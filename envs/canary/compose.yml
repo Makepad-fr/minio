@@ -1,0 +1,25 @@
+services:
+  minio:
+    env_file:
+      - ./envs/canary/.env.minio
+    volumes:
+      - "${MAKEPAD_MINIO_DATA_PATH:-/var/lib/makepad/minio-canary}:/data"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.infra.makepad.minio == true
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        parallelism: 1
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+
+networks:
+  objects:
+    external: true
+    name: ${MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK}
