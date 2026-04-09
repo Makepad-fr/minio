@@ -1,14 +1,16 @@
 services:
   minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    networks:
-      objects:
-        aliases:
-          - makepad-minio
-
-networks:
-  objects:
+    image: ${MAKEPAD_MINIO_IMAGE:-minio/minio:RELEASE.2025-07-23T15-54-02Z}
+    network_mode: host
+    command:
+      - server
+      - --address
+      - "${MAKEPAD_MINIO_BIND_ADDRESS:-0.0.0.0}:${MAKEPAD_MINIO_PORT:-9000}"
+      - --console-address
+      - "127.0.0.1:${MAKEPAD_MINIO_CONSOLE_PORT:-9001}"
+      - /data
+    env_file:
+      - /etc/makepad/minio/minio.env
+    volumes:
+      - "${MAKEPAD_MINIO_DATA_PATH:-/var/lib/makepad/minio}:/data"
+    restart: unless-stopped
