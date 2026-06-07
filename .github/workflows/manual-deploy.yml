@@ -34,8 +34,11 @@ jobs:
         shell: bash
         env:
           DEPLOY_CATWLK_OBJECTS_NETWORK: ${{ secrets.DEPLOY_CATWLK_OBJECTS_NETWORK }}
+          DEPLOY_VIF_OBJECTS_NETWORK: ${{ secrets.DEPLOY_VIF_OBJECTS_NETWORK }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
+          : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK environment secret}"
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
           cp compose.yml "${bundle_root}/compose.yml"
@@ -43,6 +46,7 @@ jobs:
           cp "envs/${{ inputs.environment }}/.env.minio" "${bundle_root}/envs/${{ inputs.environment }}/.env.minio"
           cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
           MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${DEPLOY_CATWLK_OBJECTS_NETWORK}
+          MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${DEPLOY_VIF_OBJECTS_NETWORK}
           EOF
 
       - name: Deploy via Docker Swarm
@@ -56,6 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           : "${REMOTE_HOST:?}" "${REMOTE_USER:?}" "${REMOTE_DIR:?}" "${STACK_NAME:?}"
+          if [[ "${REMOTE_USER}" == "root" ]]; then
+            echo "DEPLOY_SSH_USER must not be root." >&2
+            exit 1
+          fi
           bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
@@ -76,14 +84,20 @@ jobs:
           env_minio="${remote_dir}/envs/${deploy_env}/.env.minio"
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
           objects_network=$(grep '^MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
+          vif_objects_network=$(grep '^MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
           catwlk_bucket=$(grep '^MAKEPAD_MINIO_CATWLK_BUCKET=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
+          vif_bucket=$(grep '^MAKEPAD_MINIO_VIF_BUCKET=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
           minio_root_user=$(grep '^MINIO_ROOT_USER=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
           minio_root_password=$(grep '^MINIO_ROOT_PASSWORD=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
 
           docker network inspect "${objects_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${objects_network}"
+          docker network inspect "${vif_objects_network}" >/dev/null 2>&1 \
+            || docker network create --driver overlay --attachable "${vif_objects_network}"
 
-          MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK="${objects_network}" docker compose \
+          MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK="${objects_network}" \
+          MAKEPAD_MINIO_VIF_OBJECTS_NETWORK="${vif_objects_network}" \
+          docker compose \
             --env-file "${env_minio}" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \
@@ -104,4 +118,8 @@ jobs:
             alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
           docker run --rm --network "${objects_network}" minio/mc:latest \
             mb --ignore-existing "local/${catwlk_bucket}" >/dev/null
+          docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+            alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
+          docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+            mb --ignore-existing "local/${vif_bucket}" >/dev/null
           EOF

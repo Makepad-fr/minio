@@ -24,3 +24,6 @@ networks:
   objects:
     external: true
     name: ${MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK}
+  vif_objects:
+    external: true
+    name: ${MAKEPAD_MINIO_VIF_OBJECTS_NETWORK}
