@@ -69,6 +69,7 @@ jobs:
             : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK production environment secret}"
             printf 'MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=%s\n' "${DEPLOY_VIF_OBJECTS_NETWORK}" >> "${env_deploy}"
           fi
+          chmod 600 "${env_minio}" "${env_deploy}"
 
       - name: Deploy via Docker Swarm
         shell: bash
@@ -95,7 +96,11 @@ jobs:
           scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.minio" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.minio"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 "${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.minio"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 "${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
 
           ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${STACK_NAME}" "${{ inputs.environment }}" <<'EOF'
           set -euo pipefail
