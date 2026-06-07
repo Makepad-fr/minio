@@ -162,6 +162,14 @@ jobs:
           docker run --rm --network "${objects_network}" minio/mc:latest \
             mb --ignore-existing "local/${catwlk_bucket}" >/dev/null
           if [[ "${vif_enabled}" == "true" ]]; then
+            for attempt in $(seq 1 30); do
+              if docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+                alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+
             docker run --rm --network "${vif_objects_network}" minio/mc:latest \
               alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
             docker run --rm --network "${vif_objects_network}" minio/mc:latest \
