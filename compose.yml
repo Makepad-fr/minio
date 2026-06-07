@@ -9,10 +9,6 @@ services:
       objects:
         aliases:
           - makepad-minio
-      vif_objects:
-        aliases:
-          - makepad-minio-vif
 
 networks:
   objects:
-  vif_objects:

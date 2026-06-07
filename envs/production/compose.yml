@@ -2,6 +2,10 @@ services:
   minio:
     env_file:
       - ./envs/production/.env.minio
+    networks:
+      vif_objects:
+        aliases:
+          - makepad-minio-vif
     volumes:
       - "${MAKEPAD_MINIO_DATA_PATH:-/var/lib/makepad/minio}:/data"
     deploy:
