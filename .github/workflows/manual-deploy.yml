@@ -47,7 +47,8 @@ jobs:
           cp "envs/${deploy_env}/compose.yml" "${bundle_root}/envs/${deploy_env}/compose.yml"
           cp "envs/${deploy_env}/.env.minio" "${bundle_root}/envs/${deploy_env}/.env.minio"
           env_minio="${bundle_root}/envs/${deploy_env}/.env.minio"
-          env_minio_tmp="${env_minio}.tmp"
+          env_minio_tmp=$(mktemp "${env_minio}.XXXXXX")
+          trap 'rm -f "${env_minio_tmp}"' EXIT
           password_written=false
           while IFS= read -r line || [[ -n "${line}" ]]; do
             if [[ "${line}" == "MINIO_ROOT_PASSWORD="* ]]; then
@@ -61,6 +62,7 @@ jobs:
             printf 'MINIO_ROOT_PASSWORD=%s\n' "${DEPLOY_MINIO_ROOT_PASSWORD}" >> "${env_minio_tmp}"
           fi
           mv "${env_minio_tmp}" "${env_minio}"
+          trap - EXIT
           env_deploy="${bundle_root}/envs/${deploy_env}/.env.deploy"
           printf 'MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=%s\n' "${DEPLOY_CATWLK_OBJECTS_NETWORK}" > "${env_deploy}"
           if [[ "${deploy_env}" == "production" ]]; then
@@ -157,12 +159,19 @@ jobs:
             compose_env+=("MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${vif_objects_network}")
           fi
 
+          umask 077
+          stack_tmp=$(mktemp "${remote_dir}/stack.yml.XXXXXX")
+          trap 'rm -f "${stack_tmp}"' EXIT
           env "${compose_env[@]}" docker compose \
             --env-file "${env_minio}" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \
             -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
-            config > "${remote_dir}/stack.yml"
+            config > "${stack_tmp}"
+          chmod 600 "${stack_tmp}"
+          mv "${stack_tmp}" "${remote_dir}/stack.yml"
+          chmod 600 "${remote_dir}/stack.yml"
+          trap - EXIT
 
           docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
 
