@@ -34,16 +34,33 @@ jobs:
         shell: bash
         env:
           DEPLOY_CATWLK_OBJECTS_NETWORK: ${{ secrets.DEPLOY_CATWLK_OBJECTS_NETWORK }}
+          DEPLOY_MINIO_ROOT_PASSWORD: ${{ secrets.DEPLOY_MINIO_ROOT_PASSWORD }}
           DEPLOY_VIF_OBJECTS_NETWORK: ${{ secrets.DEPLOY_VIF_OBJECTS_NETWORK }}
         run: |
           set -euo pipefail
           : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
+          : "${DEPLOY_MINIO_ROOT_PASSWORD:?set DEPLOY_MINIO_ROOT_PASSWORD environment secret}"
           deploy_env="${{ inputs.environment }}"
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${deploy_env}"
           cp compose.yml "${bundle_root}/compose.yml"
           cp "envs/${deploy_env}/compose.yml" "${bundle_root}/envs/${deploy_env}/compose.yml"
           cp "envs/${deploy_env}/.env.minio" "${bundle_root}/envs/${deploy_env}/.env.minio"
+          env_minio="${bundle_root}/envs/${deploy_env}/.env.minio"
+          env_minio_tmp="${env_minio}.tmp"
+          password_written=false
+          while IFS= read -r line || [[ -n "${line}" ]]; do
+            if [[ "${line}" == "MINIO_ROOT_PASSWORD="* ]]; then
+              printf 'MINIO_ROOT_PASSWORD=%s\n' "${DEPLOY_MINIO_ROOT_PASSWORD}" >> "${env_minio_tmp}"
+              password_written=true
+            else
+              printf '%s\n' "${line}" >> "${env_minio_tmp}"
+            fi
+          done < "${env_minio}"
+          if [[ "${password_written}" != "true" ]]; then
+            printf 'MINIO_ROOT_PASSWORD=%s\n' "${DEPLOY_MINIO_ROOT_PASSWORD}" >> "${env_minio_tmp}"
+          fi
+          mv "${env_minio_tmp}" "${env_minio}"
           env_deploy="${bundle_root}/envs/${deploy_env}/.env.deploy"
           printf 'MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=%s\n' "${DEPLOY_CATWLK_OBJECTS_NETWORK}" > "${env_deploy}"
           if [[ "${deploy_env}" == "production" ]]; then

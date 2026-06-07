@@ -14,11 +14,12 @@ This repository owns the shared MinIO server that application repositories conne
 
 ## Networks
 
-The shared MinIO service joins app-specific external overlay networks. For Catwlk:
+The shared MinIO service joins app-specific external overlay networks:
 
-- `${DEPLOY_CATWLK_OBJECTS_NETWORK}`
+- Catwlk canary and production: `${DEPLOY_CATWLK_OBJECTS_NETWORK}` with service alias `makepad-minio`
+- VIF production only: `${DEPLOY_VIF_OBJECTS_NETWORK}` with service alias `makepad-minio-vif`
 
-Application stacks attach to the same network and connect to the stable service alias `makepad-minio`.
+Application stacks attach to their matching network and connect to the stable service alias for that application. VIF is intentionally production-only in this repository; canary deploys do not create or attach the VIF network.
 
 ## Buckets
 
@@ -26,6 +27,10 @@ Use one bucket per application. For Catwlk:
 
 - canary: `${MAKEPAD_MINIO_CATWLK_BUCKET}`
 - production: `${MAKEPAD_MINIO_CATWLK_BUCKET}`
+
+For VIF:
+
+- production: `${MAKEPAD_MINIO_VIF_BUCKET}`
 
 Applications should use their own bucket instead of sharing a global one.
 
@@ -52,5 +57,12 @@ Required environment secrets:
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_OBJECTS_NETWORK`
+- `DEPLOY_MINIO_ROOT_PASSWORD`
 
-The workflow deploys only the MinIO stack. If the Catwlk objects network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated.
+Required production-only environment secret:
+
+- `DEPLOY_VIF_OBJECTS_NETWORK`
+
+The tracked `envs/<environment>/.env.minio` files intentionally leave `MINIO_ROOT_PASSWORD` empty. During deployment, the workflow copies the selected env file into a temporary bundle and injects `DEPLOY_MINIO_ROOT_PASSWORD` into that bundle before uploading it to the target host. If the secret is absent, the workflow fails before writing or uploading an empty password.
+
+The workflow deploys only the MinIO stack. If a required objects network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated. Production deploys additionally create the VIF network when needed and ensure the VIF bucket exists.
