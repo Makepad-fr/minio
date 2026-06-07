@@ -38,16 +38,18 @@ jobs:
         run: |
           set -euo pipefail
           : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
-          : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK environment secret}"
+          deploy_env="${{ inputs.environment }}"
           bundle_root="${RUNNER_TEMP}/bundle"
-          mkdir -p "${bundle_root}/envs/${{ inputs.environment }}"
+          mkdir -p "${bundle_root}/envs/${deploy_env}"
           cp compose.yml "${bundle_root}/compose.yml"
-          cp "envs/${{ inputs.environment }}/compose.yml" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml"
-          cp "envs/${{ inputs.environment }}/.env.minio" "${bundle_root}/envs/${{ inputs.environment }}/.env.minio"
-          cat > "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" <<EOF
-          MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${DEPLOY_CATWLK_OBJECTS_NETWORK}
-          MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${DEPLOY_VIF_OBJECTS_NETWORK}
-          EOF
+          cp "envs/${deploy_env}/compose.yml" "${bundle_root}/envs/${deploy_env}/compose.yml"
+          cp "envs/${deploy_env}/.env.minio" "${bundle_root}/envs/${deploy_env}/.env.minio"
+          env_deploy="${bundle_root}/envs/${deploy_env}/.env.deploy"
+          printf 'MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=%s\n' "${DEPLOY_CATWLK_OBJECTS_NETWORK}" > "${env_deploy}"
+          if [[ "${deploy_env}" == "production" ]]; then
+            : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK production environment secret}"
+            printf 'MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=%s\n' "${DEPLOY_VIF_OBJECTS_NETWORK}" >> "${env_deploy}"
+          fi
 
       - name: Deploy via Docker Swarm
         shell: bash
@@ -83,21 +85,62 @@ jobs:
           deploy_env=$3
           env_minio="${remote_dir}/envs/${deploy_env}/.env.minio"
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
-          objects_network=$(grep '^MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          vif_objects_network=$(grep '^MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=' "${env_deploy}" | tail -n 1 | cut -d= -f2-)
-          catwlk_bucket=$(grep '^MAKEPAD_MINIO_CATWLK_BUCKET=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
-          vif_bucket=$(grep '^MAKEPAD_MINIO_VIF_BUCKET=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
-          minio_root_user=$(grep '^MINIO_ROOT_USER=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
-          minio_root_password=$(grep '^MINIO_ROOT_PASSWORD=' "${env_minio}" | tail -n 1 | cut -d= -f2-)
+          env_value() {
+            local key=$1
+            local file=$2
+            awk -v key="${key}" '
+              index($0, key "=") == 1 {
+                value = substr($0, length(key) + 2)
+                found = 1
+              }
+              END {
+                if (found) {
+                  printf "%s", value
+                }
+              }
+            ' "${file}"
+          }
+          require_value() {
+            local key=$1
+            local value=$2
+            if [[ -z "${value}" ]]; then
+              echo "Missing required deploy value: ${key}" >&2
+              exit 1
+            fi
+          }
+
+          objects_network=$(env_value MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK "${env_deploy}")
+          vif_objects_network=$(env_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${env_deploy}")
+          catwlk_bucket=$(env_value MAKEPAD_MINIO_CATWLK_BUCKET "${env_minio}")
+          vif_bucket=$(env_value MAKEPAD_MINIO_VIF_BUCKET "${env_minio}")
+          minio_root_user=$(env_value MINIO_ROOT_USER "${env_minio}")
+          minio_root_password=$(env_value MINIO_ROOT_PASSWORD "${env_minio}")
+
+          require_value MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK "${objects_network}"
+          require_value MAKEPAD_MINIO_CATWLK_BUCKET "${catwlk_bucket}"
+          require_value MINIO_ROOT_USER "${minio_root_user}"
+          require_value MINIO_ROOT_PASSWORD "${minio_root_password}"
+
+          vif_enabled=false
+          if [[ "${deploy_env}" == "production" || -n "${vif_objects_network}" || -n "${vif_bucket}" ]]; then
+            vif_enabled=true
+            require_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${vif_objects_network}"
+            require_value MAKEPAD_MINIO_VIF_BUCKET "${vif_bucket}"
+          fi
 
           docker network inspect "${objects_network}" >/dev/null 2>&1 \
             || docker network create --driver overlay --attachable "${objects_network}"
-          docker network inspect "${vif_objects_network}" >/dev/null 2>&1 \
-            || docker network create --driver overlay --attachable "${vif_objects_network}"
+          if [[ "${vif_enabled}" == "true" ]]; then
+            docker network inspect "${vif_objects_network}" >/dev/null 2>&1 \
+              || docker network create --driver overlay --attachable "${vif_objects_network}"
+          fi
 
-          MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK="${objects_network}" \
-          MAKEPAD_MINIO_VIF_OBJECTS_NETWORK="${vif_objects_network}" \
-          docker compose \
+          compose_env=("MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${objects_network}")
+          if [[ "${vif_enabled}" == "true" ]]; then
+            compose_env+=("MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${vif_objects_network}")
+          fi
+
+          env "${compose_env[@]}" docker compose \
             --env-file "${env_minio}" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \
@@ -118,8 +161,10 @@ jobs:
             alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
           docker run --rm --network "${objects_network}" minio/mc:latest \
             mb --ignore-existing "local/${catwlk_bucket}" >/dev/null
-          docker run --rm --network "${vif_objects_network}" minio/mc:latest \
-            alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
-          docker run --rm --network "${vif_objects_network}" minio/mc:latest \
-            mb --ignore-existing "local/${vif_bucket}" >/dev/null
+          if [[ "${vif_enabled}" == "true" ]]; then
+            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+              alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
+            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+              mb --ignore-existing "local/${vif_bucket}" >/dev/null
+          fi
           EOF
