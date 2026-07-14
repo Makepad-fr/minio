@@ -36,6 +36,7 @@ jobs:
           DEPLOY_CATWLK_OBJECTS_NETWORK: ${{ secrets.DEPLOY_CATWLK_OBJECTS_NETWORK }}
           DEPLOY_MINIO_ROOT_PASSWORD: ${{ secrets.DEPLOY_MINIO_ROOT_PASSWORD }}
           DEPLOY_VIF_OBJECTS_NETWORK: ${{ secrets.DEPLOY_VIF_OBJECTS_NETWORK }}
+          DEPLOY_FASHION_OBJECTS_NETWORK: ${{ secrets.DEPLOY_FASHION_OBJECTS_NETWORK }}
         run: |
           set -euo pipefail
           : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
@@ -67,7 +68,9 @@ jobs:
           printf 'MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=%s\n' "${DEPLOY_CATWLK_OBJECTS_NETWORK}" > "${env_deploy}"
           if [[ "${deploy_env}" == "production" ]]; then
             : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK production environment secret}"
+            : "${DEPLOY_FASHION_OBJECTS_NETWORK:?set DEPLOY_FASHION_OBJECTS_NETWORK production environment secret}"
             printf 'MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=%s\n' "${DEPLOY_VIF_OBJECTS_NETWORK}" >> "${env_deploy}"
+            printf 'MAKEPAD_MINIO_FASHION_OBJECTS_NETWORK=%s\n' "${DEPLOY_FASHION_OBJECTS_NETWORK}" >> "${env_deploy}"
           fi
           chmod 600 "${env_minio}" "${env_deploy}"
 
@@ -135,8 +138,10 @@ jobs:
 
           objects_network=$(env_value MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK "${env_deploy}")
           vif_objects_network=$(env_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${env_deploy}")
+          fashion_objects_network=$(env_value MAKEPAD_MINIO_FASHION_OBJECTS_NETWORK "${env_deploy}")
           catwlk_bucket=$(env_value MAKEPAD_MINIO_CATWLK_BUCKET "${env_minio}")
           vif_bucket=$(env_value MAKEPAD_MINIO_VIF_BUCKET "${env_minio}")
+          fashion_bucket=$(env_value MAKEPAD_MINIO_FASHION_BUCKET "${env_minio}")
           minio_root_user=$(env_value MINIO_ROOT_USER "${env_minio}")
           minio_root_password=$(env_value MINIO_ROOT_PASSWORD "${env_minio}")
 
@@ -146,10 +151,16 @@ jobs:
           require_value MINIO_ROOT_PASSWORD "${minio_root_password}"
 
           vif_enabled=false
+          fashion_enabled=false
           if [[ "${deploy_env}" == "production" || -n "${vif_objects_network}" || -n "${vif_bucket}" ]]; then
             vif_enabled=true
             require_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${vif_objects_network}"
             require_value MAKEPAD_MINIO_VIF_BUCKET "${vif_bucket}"
+          fi
+          if [[ "${deploy_env}" == "production" || -n "${fashion_objects_network}" || -n "${fashion_bucket}" ]]; then
+            fashion_enabled=true
+            require_value MAKEPAD_MINIO_FASHION_OBJECTS_NETWORK "${fashion_objects_network}"
+            require_value MAKEPAD_MINIO_FASHION_BUCKET "${fashion_bucket}"
           fi
 
           docker network inspect "${objects_network}" >/dev/null 2>&1 \
@@ -158,10 +169,17 @@ jobs:
             docker network inspect "${vif_objects_network}" >/dev/null 2>&1 \
               || docker network create --driver overlay --attachable "${vif_objects_network}"
           fi
+          if [[ "${fashion_enabled}" == "true" ]]; then
+            docker network inspect "${fashion_objects_network}" >/dev/null 2>&1 \
+              || docker network create --driver overlay --attachable "${fashion_objects_network}"
+          fi
 
           compose_env=("MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${objects_network}")
           if [[ "${vif_enabled}" == "true" ]]; then
             compose_env+=("MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${vif_objects_network}")
+          fi
+          if [[ "${fashion_enabled}" == "true" ]]; then
+            compose_env+=("MAKEPAD_MINIO_FASHION_OBJECTS_NETWORK=${fashion_objects_network}")
           fi
 
           umask 077
@@ -205,5 +223,19 @@ jobs:
               alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
             docker run --rm --network "${vif_objects_network}" minio/mc:latest \
               mb --ignore-existing "local/${vif_bucket}" >/dev/null
+          fi
+          if [[ "${fashion_enabled}" == "true" ]]; then
+            for attempt in $(seq 1 30); do
+              if docker run --rm --network "${fashion_objects_network}" minio/mc:latest \
+                alias set local http://makepad-minio-fashion:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+
+            docker run --rm --network "${fashion_objects_network}" minio/mc:latest \
+              alias set local http://makepad-minio-fashion:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
+            docker run --rm --network "${fashion_objects_network}" minio/mc:latest \
+              mb --ignore-existing "local/${fashion_bucket}" >/dev/null
           fi
           EOF

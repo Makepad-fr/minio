@@ -6,6 +6,9 @@ services:
       vif_objects:
         aliases:
           - makepad-minio-vif
+      fashion_objects:
+        aliases:
+          - makepad-minio-fashion
     volumes:
       - "${MAKEPAD_MINIO_DATA_PATH:-/var/lib/makepad/minio}:/data"
     deploy:
@@ -31,3 +34,6 @@ networks:
   vif_objects:
     external: true
     name: ${MAKEPAD_MINIO_VIF_OBJECTS_NETWORK}
+  fashion_objects:
+    external: true
+    name: ${MAKEPAD_MINIO_FASHION_OBJECTS_NETWORK}
