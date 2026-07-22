@@ -39,6 +39,19 @@ For Fashion crawler product data:
 
 Applications should use their own bucket instead of sharing a global one.
 
+Provision the Fashion Iceberg bucket and its least-privilege writer identity on
+the current standalone MinIO host with:
+
+```bash
+MINIO_ICEBERG_ACCESS_KEY=scraping-iceberg \
+MINIO_ICEBERG_SECRET_KEY='<generated-secret>' \
+bash scripts/provision-fashion-iceberg.sh
+```
+
+The script is idempotent and limits the identity to the configured Fashion
+bucket. It reads MinIO administrator credentials from the running container and
+does not persist them in this repository.
+
 ## Node Labels
 
 Pin the shared MinIO server to the database/storage node:
