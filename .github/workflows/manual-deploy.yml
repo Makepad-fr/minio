@@ -44,6 +44,7 @@ jobs:
           scp "${scp_opts[@]}" scripts/provision-betacrew.sh "${remote_target}:${staging_dir}/scripts/provision-betacrew.sh"
           scp "${scp_opts[@]}" scripts/backup-minio.sh "${remote_target}:${staging_dir}/scripts/backup-minio.sh"
           scp "${scp_opts[@]}" scripts/verify-betacrew-restore.sh "${remote_target}:${staging_dir}/scripts/verify-betacrew-restore.sh"
+          scp "${scp_opts[@]}" scripts/install-host.sh "${remote_target}:${staging_dir}/scripts/install-host.sh"
           scp "${scp_opts[@]}" systemd/makepad-minio.service "${remote_target}:${staging_dir}/systemd/makepad-minio.service"
           scp "${scp_opts[@]}" systemd/makepad-minio-backup.service "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.service"
           scp "${scp_opts[@]}" systemd/makepad-minio-backup.timer "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.timer"
@@ -72,43 +73,6 @@ jobs:
           scp "${scp_opts[@]}" "${secret_file}" "${remote_target}:/tmp/betacrew-minio-password"
           find "${secret_file}" -delete
 
-          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${MINIO_STAGING_DIR}" <<'EOF'
-          set -euo pipefail
-          remote_dir=$1
-          staging_dir=$2
-
-          sudo install -d -m 0755 "${remote_dir}" "${remote_dir}/envs/production" "${remote_dir}/scripts" "${remote_dir}/systemd"
-          sudo install -o root -g root -m 0644 "${staging_dir}/compose.yml" "${remote_dir}/compose.yml"
-          sudo install -o root -g root -m 0644 "${staging_dir}/envs/production/.env.minio" "${remote_dir}/envs/production/.env.minio"
-          sudo install -o root -g root -m 0755 "${staging_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/provision-catwlk.sh"
-          sudo install -o root -g root -m 0755 "${staging_dir}/scripts/provision-betacrew.sh" "${remote_dir}/scripts/provision-betacrew.sh"
-          sudo install -o root -g root -m 0755 "${staging_dir}/scripts/backup-minio.sh" "${remote_dir}/scripts/backup-minio.sh"
-          sudo install -o root -g root -m 0755 "${staging_dir}/scripts/verify-betacrew-restore.sh" "${remote_dir}/scripts/verify-betacrew-restore.sh"
-          sudo install -o root -g root -m 0644 "${staging_dir}/systemd/makepad-minio.service" "${remote_dir}/systemd/makepad-minio.service"
-          sudo install -o root -g root -m 0644 "${staging_dir}/systemd/makepad-minio-backup.service" "${remote_dir}/systemd/makepad-minio-backup.service"
-          sudo install -o root -g root -m 0644 "${staging_dir}/systemd/makepad-minio-backup.timer" "${remote_dir}/systemd/makepad-minio-backup.timer"
-          find "${staging_dir}" -mindepth 1 -delete
-          rmdir "${staging_dir}"
-
-          sudo sh -eu -c '
-            destination=/etc/makepad/minio/minio.env
-            incoming=/tmp/betacrew-minio-password
-            temporary=$(mktemp)
-            trap '\''find "${temporary}" -delete 2>/dev/null || true'\'' EXIT
-            grep -v "^MAKEPAD_BETACREW_PRODUCTION_PASSWORD=" "${destination}" > "${temporary}"
-            printf "MAKEPAD_BETACREW_PRODUCTION_PASSWORD=%s\n" "$(tr -d "\r\n" < "${incoming}")" >> "${temporary}"
-            chown root:root "${temporary}"
-            chmod 0600 "${temporary}"
-            mv "${temporary}" "${destination}"
-            find "${incoming}" -delete
-          '
-
-          chmod 755 "${remote_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/provision-betacrew.sh" "${remote_dir}/scripts/backup-minio.sh" "${remote_dir}/scripts/verify-betacrew-restore.sh"
-          sudo cp "${remote_dir}/systemd/makepad-minio.service" /etc/systemd/system/makepad-minio.service
-          sudo cp "${remote_dir}/systemd/makepad-minio-backup.service" /etc/systemd/system/makepad-minio-backup.service
-          sudo cp "${remote_dir}/systemd/makepad-minio-backup.timer" /etc/systemd/system/makepad-minio-backup.timer
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now makepad-minio.service
-          sudo "${remote_dir}/scripts/provision-betacrew.sh"
-          sudo systemctl enable --now makepad-minio-backup.timer
-          EOF
+          ssh "${ssh_opts[@]}" "${remote_target}" \
+            bash "${MINIO_STAGING_DIR}/scripts/install-host.sh" \
+              "${REMOTE_DIR}" "${MINIO_STAGING_DIR}" /tmp/betacrew-minio-password

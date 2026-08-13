@@ -21,7 +21,9 @@ probe_key=".backup-restore-probe/${probe_id}.txt"
 printf 'BetaCrew backup restore probe %s\n' "${probe_id}" > "${work_dir}/probe.txt"
 
 mc_local() {
-  docker run --rm --network host -v "${mc_config_dir}:/root/.mc" \
+  docker run --rm --network host \
+    -v "${mc_config_dir}:/root/.mc" \
+    -v "${work_dir}:/work" \
     "${MAKEPAD_MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-07-21T05-28-08Z}" "$@"
 }
 cleanup() {
@@ -32,7 +34,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mc_local alias set local "http://127.0.0.1:${MAKEPAD_MINIO_PORT:-9000}" "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}" >/dev/null
-mc_local cp "${work_dir}/probe.txt" "local/${MAKEPAD_BETACREW_PRODUCTION_BUCKET}/${probe_key}" >/dev/null
+mc_local cp /work/probe.txt "local/${MAKEPAD_BETACREW_PRODUCTION_BUCKET}/${probe_key}" >/dev/null
 "${repo_root}/scripts/backup-minio.sh" >/dev/null
 restic restore latest --target "${restore_dir}" >/dev/null
 
