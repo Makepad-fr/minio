@@ -40,7 +40,9 @@ jobs:
           scp "${scp_opts[@]}" compose.yml "${remote_target}:${REMOTE_DIR}/compose.yml"
           scp "${scp_opts[@]}" envs/production/.env.minio "${remote_target}:${REMOTE_DIR}/envs/production/.env.minio"
           scp "${scp_opts[@]}" scripts/provision-catwlk.sh "${remote_target}:${REMOTE_DIR}/scripts/provision-catwlk.sh"
+          scp "${scp_opts[@]}" scripts/provision-betacrew.sh "${remote_target}:${REMOTE_DIR}/scripts/provision-betacrew.sh"
           scp "${scp_opts[@]}" scripts/backup-minio.sh "${remote_target}:${REMOTE_DIR}/scripts/backup-minio.sh"
+          scp "${scp_opts[@]}" scripts/verify-betacrew-restore.sh "${remote_target}:${REMOTE_DIR}/scripts/verify-betacrew-restore.sh"
           scp "${scp_opts[@]}" systemd/makepad-minio.service "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio.service"
           scp "${scp_opts[@]}" systemd/makepad-minio-backup.service "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio-backup.service"
           scp "${scp_opts[@]}" systemd/makepad-minio-backup.timer "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio-backup.timer"
@@ -62,7 +64,7 @@ jobs:
           set -euo pipefail
           remote_dir=$1
 
-          chmod 755 "${remote_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/backup-minio.sh"
+          chmod 755 "${remote_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/provision-betacrew.sh" "${remote_dir}/scripts/backup-minio.sh" "${remote_dir}/scripts/verify-betacrew-restore.sh"
           sudo cp "${remote_dir}/systemd/makepad-minio.service" /etc/systemd/system/makepad-minio.service
           sudo cp "${remote_dir}/systemd/makepad-minio-backup.service" /etc/systemd/system/makepad-minio-backup.service
           sudo cp "${remote_dir}/systemd/makepad-minio-backup.timer" /etc/systemd/system/makepad-minio-backup.timer

@@ -10,6 +10,7 @@ RemainAfterExit=yes
 WorkingDirectory=/srv/makepad/minio
 ExecStart=/usr/bin/docker compose up -d
 ExecStartPost=/srv/makepad/minio/scripts/provision-catwlk.sh
+ExecStartPost=/srv/makepad/minio/scripts/provision-betacrew.sh
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
 

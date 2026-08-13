@@ -31,6 +31,7 @@ mkdir -p "${backup_root}"
 
 mc_local mirror --overwrite "local/${MAKEPAD_CATWLK_PRODUCTION_BUCKET}" "${backup_root}/catwlk-production" >/dev/null
 mc_local mirror --overwrite "local/${MAKEPAD_CATWLK_CANARY_BUCKET}" "${backup_root}/catwlk-canary" >/dev/null
+mc_local mirror --overwrite "local/${MAKEPAD_BETACREW_PRODUCTION_BUCKET}" "${backup_root}/betacrew-production" >/dev/null
 
 restic backup "${backup_root}"
 restic forget --prune \
