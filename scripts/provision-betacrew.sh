@@ -18,7 +18,10 @@ set +a
 : "${MAKEPAD_BETACREW_PRODUCTION_PASSWORD:?MAKEPAD_BETACREW_PRODUCTION_PASSWORD is required}"
 
 mc_config_dir="$(mktemp -d)"
-cleanup() { find "${mc_config_dir}" -mindepth 1 -delete 2>/dev/null || true; rmdir "${mc_config_dir}" 2>/dev/null || true; }
+cleanup() {
+  docker run --rm -v "${mc_config_dir}:/target" alpine:3.22 sh -c 'find /target -mindepth 1 -delete' >/dev/null 2>&1 || true
+  rmdir "${mc_config_dir}" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 mc_local() {
