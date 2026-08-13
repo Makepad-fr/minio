@@ -54,15 +54,38 @@ jobs:
           REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+          BETACREW_PRODUCTION_PASSWORD: ${{ secrets.MAKEPAD_BETACREW_PRODUCTION_PASSWORD }}
         run: |
           set -euo pipefail
+          : "${BETACREW_PRODUCTION_PASSWORD:?set MAKEPAD_BETACREW_PRODUCTION_PASSWORD}"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
+          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
+
+          secret_file=$(mktemp)
+          chmod 600 "${secret_file}"
+          printf '%s\n' "${BETACREW_PRODUCTION_PASSWORD}" > "${secret_file}"
+          ssh "${ssh_opts[@]}" "${remote_target}" 'umask 077; : > /tmp/betacrew-minio-password'
+          scp "${scp_opts[@]}" "${secret_file}" "${remote_target}:/tmp/betacrew-minio-password"
+          find "${secret_file}" -delete
 
           ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" <<'EOF'
           set -euo pipefail
           remote_dir=$1
+
+          sudo sh -eu -c '
+            destination=/etc/makepad/minio/minio.env
+            incoming=/tmp/betacrew-minio-password
+            temporary=$(mktemp)
+            trap '\''find "${temporary}" -delete 2>/dev/null || true'\'' EXIT
+            grep -v "^MAKEPAD_BETACREW_PRODUCTION_PASSWORD=" "${destination}" > "${temporary}"
+            printf "MAKEPAD_BETACREW_PRODUCTION_PASSWORD=%s\n" "$(tr -d "\r\n" < "${incoming}")" >> "${temporary}"
+            chown root:root "${temporary}"
+            chmod 0600 "${temporary}"
+            mv "${temporary}" "${destination}"
+            find "${incoming}" -delete
+          '
 
           chmod 755 "${remote_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/provision-betacrew.sh" "${remote_dir}/scripts/backup-minio.sh" "${remote_dir}/scripts/verify-betacrew-restore.sh"
           sudo cp "${remote_dir}/systemd/makepad-minio.service" /etc/systemd/system/makepad-minio.service
@@ -70,5 +93,6 @@ jobs:
           sudo cp "${remote_dir}/systemd/makepad-minio-backup.timer" /etc/systemd/system/makepad-minio-backup.timer
           sudo systemctl daemon-reload
           sudo systemctl enable --now makepad-minio.service
+          sudo "${remote_dir}/scripts/provision-betacrew.sh"
           sudo systemctl enable --now makepad-minio-backup.timer
           EOF
