@@ -35,15 +35,20 @@ jobs:
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
           scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
+          staging_dir="/tmp/makepad-minio-${GITHUB_RUN_ID}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/production" "${REMOTE_DIR}/scripts" "${REMOTE_DIR}/systemd"
-          scp "${scp_opts[@]}" compose.yml "${remote_target}:${REMOTE_DIR}/compose.yml"
-          scp "${scp_opts[@]}" envs/production/.env.minio "${remote_target}:${REMOTE_DIR}/envs/production/.env.minio"
-          scp "${scp_opts[@]}" scripts/provision-catwlk.sh "${remote_target}:${REMOTE_DIR}/scripts/provision-catwlk.sh"
-          scp "${scp_opts[@]}" scripts/backup-minio.sh "${remote_target}:${REMOTE_DIR}/scripts/backup-minio.sh"
-          scp "${scp_opts[@]}" systemd/makepad-minio.service "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio.service"
-          scp "${scp_opts[@]}" systemd/makepad-minio-backup.service "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio-backup.service"
-          scp "${scp_opts[@]}" systemd/makepad-minio-backup.timer "${remote_target}:${REMOTE_DIR}/systemd/makepad-minio-backup.timer"
+          ssh "${ssh_opts[@]}" "${remote_target}" install -d -m 0700 "${staging_dir}" "${staging_dir}/envs/production" "${staging_dir}/scripts" "${staging_dir}/systemd"
+          scp "${scp_opts[@]}" compose.yml "${remote_target}:${staging_dir}/compose.yml"
+          scp "${scp_opts[@]}" envs/production/.env.minio "${remote_target}:${staging_dir}/envs/production/.env.minio"
+          scp "${scp_opts[@]}" scripts/provision-catwlk.sh "${remote_target}:${staging_dir}/scripts/provision-catwlk.sh"
+          scp "${scp_opts[@]}" scripts/provision-betacrew.sh "${remote_target}:${staging_dir}/scripts/provision-betacrew.sh"
+          scp "${scp_opts[@]}" scripts/backup-minio.sh "${remote_target}:${staging_dir}/scripts/backup-minio.sh"
+          scp "${scp_opts[@]}" scripts/verify-betacrew-restore.sh "${remote_target}:${staging_dir}/scripts/verify-betacrew-restore.sh"
+          scp "${scp_opts[@]}" scripts/install-host.sh "${remote_target}:${staging_dir}/scripts/install-host.sh"
+          scp "${scp_opts[@]}" systemd/makepad-minio.service "${remote_target}:${staging_dir}/systemd/makepad-minio.service"
+          scp "${scp_opts[@]}" systemd/makepad-minio-backup.service "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.service"
+          scp "${scp_opts[@]}" systemd/makepad-minio-backup.timer "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.timer"
+          echo "MINIO_STAGING_DIR=${staging_dir}" >> "${GITHUB_ENV}"
 
       - name: Enable MinIO service and backup timer
         shell: bash
@@ -52,21 +57,22 @@ jobs:
           REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+          BETACREW_PRODUCTION_PASSWORD: ${{ secrets.MAKEPAD_BETACREW_PRODUCTION_PASSWORD }}
         run: |
           set -euo pipefail
+          : "${BETACREW_PRODUCTION_PASSWORD:?set MAKEPAD_BETACREW_PRODUCTION_PASSWORD}"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
+          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" <<'EOF'
-          set -euo pipefail
-          remote_dir=$1
+          secret_file=$(mktemp)
+          chmod 600 "${secret_file}"
+          printf '%s\n' "${BETACREW_PRODUCTION_PASSWORD}" > "${secret_file}"
+          ssh "${ssh_opts[@]}" "${remote_target}" 'umask 077; : > /tmp/betacrew-minio-password'
+          scp "${scp_opts[@]}" "${secret_file}" "${remote_target}:/tmp/betacrew-minio-password"
+          find "${secret_file}" -delete
 
-          chmod 755 "${remote_dir}/scripts/provision-catwlk.sh" "${remote_dir}/scripts/backup-minio.sh"
-          sudo cp "${remote_dir}/systemd/makepad-minio.service" /etc/systemd/system/makepad-minio.service
-          sudo cp "${remote_dir}/systemd/makepad-minio-backup.service" /etc/systemd/system/makepad-minio-backup.service
-          sudo cp "${remote_dir}/systemd/makepad-minio-backup.timer" /etc/systemd/system/makepad-minio-backup.timer
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now makepad-minio.service
-          sudo systemctl enable --now makepad-minio-backup.timer
-          EOF
+          ssh "${ssh_opts[@]}" "${remote_target}" \
+            bash "${MINIO_STAGING_DIR}/scripts/install-host.sh" \
+              "${REMOTE_DIR}" "${MINIO_STAGING_DIR}" /tmp/betacrew-minio-password

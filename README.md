@@ -29,6 +29,10 @@ Use one bucket per application. For Catwlk:
 
 Applications should use their own bucket instead of sharing a global one.
 
+BetaCrew uses the private `betacrew-production` bucket and the dedicated
+`betacrew-production-app` user. `scripts/provision-betacrew.sh` installs a
+bucket-scoped CRUD policy; it does not grant access to any other bucket.
+
 ## Node Labels
 
 Pin the shared MinIO server to the database/storage node:
@@ -54,3 +58,24 @@ Required environment secrets:
 - `DEPLOY_CATWLK_OBJECTS_NETWORK`
 
 The workflow deploys only the MinIO stack. If the Catwlk objects network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated.
+
+The current two-VM production branch runs MinIO with host networking on the
+database/storage VM. Applications reach port 9000 over WireGuard; the console
+remains bound to `127.0.0.1`. Add the BetaCrew credential only to the protected
+`/etc/makepad/minio/minio.env` file:
+
+```text
+MAKEPAD_BETACREW_PRODUCTION_PASSWORD=<generated-secret>
+```
+
+The nightly restic job mirrors `betacrew-production` alongside the existing
+buckets. After provisioning restic credentials, validate the full write,
+backup, restore, byte-compare, and cleanup path with:
+
+```bash
+sudo BETACREW_RESTORE_CONFIRM=write-probe-backup-and-restore \
+  /srv/makepad/minio/scripts/verify-betacrew-restore.sh
+```
+
+The drill uses a temporary probe under `.backup-restore-probe/` and removes it
+from live storage when finished.

@@ -19,6 +19,7 @@ trap cleanup EXIT
 mc_local() {
   docker run --rm --network host \
     -v "${mc_config_dir}:/root/.mc" \
+    -v "${MAKEPAD_MINIO_BACKUP_PATH}:${MAKEPAD_MINIO_BACKUP_PATH}" \
     "${MAKEPAD_MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-07-21T05-28-08Z}" "$@"
 }
 
@@ -31,6 +32,7 @@ mkdir -p "${backup_root}"
 
 mc_local mirror --overwrite "local/${MAKEPAD_CATWLK_PRODUCTION_BUCKET}" "${backup_root}/catwlk-production" >/dev/null
 mc_local mirror --overwrite "local/${MAKEPAD_CATWLK_CANARY_BUCKET}" "${backup_root}/catwlk-canary" >/dev/null
+mc_local mirror --overwrite "local/${MAKEPAD_BETACREW_PRODUCTION_BUCKET}" "${backup_root}/betacrew-production" >/dev/null
 
 restic backup "${backup_root}"
 restic forget --prune \
