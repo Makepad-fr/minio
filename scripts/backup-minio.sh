@@ -19,6 +19,7 @@ trap cleanup EXIT
 mc_local() {
   docker run --rm --network host \
     -v "${mc_config_dir}:/root/.mc" \
+    -v "${MAKEPAD_MINIO_BACKUP_PATH}:${MAKEPAD_MINIO_BACKUP_PATH}" \
     "${MAKEPAD_MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-07-21T05-28-08Z}" "$@"
 }
 

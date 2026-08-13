@@ -14,4 +14,5 @@ require_literal scripts/verify-betacrew-restore.sh "write-probe-backup-and-resto
 bash -n "${repo_root}/scripts/provision-betacrew.sh"
 bash -n "${repo_root}/scripts/backup-minio.sh"
 bash -n "${repo_root}/scripts/verify-betacrew-restore.sh"
+bash -n "${repo_root}/scripts/install-host.sh"
 echo "BetaCrew MinIO configuration is valid."
