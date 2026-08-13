@@ -6,7 +6,9 @@ cd "${repo_root}"
 
 set -a
 source "${repo_root}/envs/production/.env.minio"
-source /etc/makepad/minio/minio.env
+if [[ -r /etc/makepad/minio/minio.env ]]; then
+  source /etc/makepad/minio/minio.env
+fi
 set +a
 
 : "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
