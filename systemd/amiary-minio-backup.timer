@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Amiary production MinIO backup every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:15:00 UTC
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=0
+Unit=amiary-minio-backup.service
+
+[Install]
+WantedBy=timers.target

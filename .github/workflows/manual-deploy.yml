@@ -19,7 +19,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure SSH key
         shell: bash
@@ -30,22 +30,72 @@ jobs:
           printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "${HOME}/.ssh/id_ed25519"
           chmod 600 "${HOME}/.ssh/id_ed25519"
 
+      - name: Trust configured SSH host key
+        uses: Makepad-fr/add-ssh-host-key-action@1b337540ffcece7215f38921dd2fa77ae7bdcbbd
+        with:
+          server_ip_address: ${{ secrets.DEPLOY_SSH_HOST }}
+          known_host_entry: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+
       - name: Prepare deployment bundle
         shell: bash
         env:
           DEPLOY_CATWLK_OBJECTS_NETWORK: ${{ secrets.DEPLOY_CATWLK_OBJECTS_NETWORK }}
           DEPLOY_MINIO_ROOT_PASSWORD: ${{ secrets.DEPLOY_MINIO_ROOT_PASSWORD }}
           DEPLOY_VIF_OBJECTS_NETWORK: ${{ secrets.DEPLOY_VIF_OBJECTS_NETWORK }}
+          DEPLOY_AMIARY_ACCESS_KEY: ${{ secrets.DEPLOY_AMIARY_ACCESS_KEY }}
+          DEPLOY_AMIARY_SECRET_KEY: ${{ secrets.DEPLOY_AMIARY_SECRET_KEY }}
+          DEPLOY_AMIARY_BACKUP_ACCESS_KEY: ${{ secrets.DEPLOY_AMIARY_BACKUP_ACCESS_KEY }}
+          DEPLOY_AMIARY_BACKUP_SECRET_KEY: ${{ secrets.DEPLOY_AMIARY_BACKUP_SECRET_KEY }}
+          DEPLOY_AMIARY_RESTORE_ACCESS_KEY: ${{ secrets.DEPLOY_AMIARY_RESTORE_ACCESS_KEY }}
+          DEPLOY_AMIARY_RESTORE_SECRET_KEY: ${{ secrets.DEPLOY_AMIARY_RESTORE_SECRET_KEY }}
         run: |
           set -euo pipefail
           : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
           : "${DEPLOY_MINIO_ROOT_PASSWORD:?set DEPLOY_MINIO_ROOT_PASSWORD environment secret}"
+          : "${DEPLOY_AMIARY_ACCESS_KEY:?set DEPLOY_AMIARY_ACCESS_KEY environment secret}"
+          : "${DEPLOY_AMIARY_SECRET_KEY:?set DEPLOY_AMIARY_SECRET_KEY environment secret}"
+          : "${DEPLOY_AMIARY_BACKUP_ACCESS_KEY:?set DEPLOY_AMIARY_BACKUP_ACCESS_KEY environment secret}"
+          : "${DEPLOY_AMIARY_BACKUP_SECRET_KEY:?set DEPLOY_AMIARY_BACKUP_SECRET_KEY environment secret}"
+          : "${DEPLOY_AMIARY_RESTORE_ACCESS_KEY:?set DEPLOY_AMIARY_RESTORE_ACCESS_KEY environment secret}"
+          : "${DEPLOY_AMIARY_RESTORE_SECRET_KEY:?set DEPLOY_AMIARY_RESTORE_SECRET_KEY environment secret}"
+          validate_credential_pair() {
+            local access_name=$1 access_value=$2 secret_name=$3 secret_value=$4
+            if [[ "${access_value}" == *$'\n'* || "${secret_value}" == *$'\n'* ]]; then
+              echo "${access_name} and ${secret_name} must be single-line values." >&2
+              exit 1
+            fi
+            if ((${#secret_value} < 32)); then
+              echo "${secret_name} must contain at least 32 characters." >&2
+              exit 1
+            fi
+          }
+          validate_credential_pair DEPLOY_AMIARY_ACCESS_KEY "${DEPLOY_AMIARY_ACCESS_KEY}" DEPLOY_AMIARY_SECRET_KEY "${DEPLOY_AMIARY_SECRET_KEY}"
+          validate_credential_pair DEPLOY_AMIARY_BACKUP_ACCESS_KEY "${DEPLOY_AMIARY_BACKUP_ACCESS_KEY}" DEPLOY_AMIARY_BACKUP_SECRET_KEY "${DEPLOY_AMIARY_BACKUP_SECRET_KEY}"
+          validate_credential_pair DEPLOY_AMIARY_RESTORE_ACCESS_KEY "${DEPLOY_AMIARY_RESTORE_ACCESS_KEY}" DEPLOY_AMIARY_RESTORE_SECRET_KEY "${DEPLOY_AMIARY_RESTORE_SECRET_KEY}"
+          if [[ "${DEPLOY_AMIARY_ACCESS_KEY}" == "${DEPLOY_AMIARY_BACKUP_ACCESS_KEY}" ||
+                "${DEPLOY_AMIARY_ACCESS_KEY}" == "${DEPLOY_AMIARY_RESTORE_ACCESS_KEY}" ||
+                "${DEPLOY_AMIARY_BACKUP_ACCESS_KEY}" == "${DEPLOY_AMIARY_RESTORE_ACCESS_KEY}" ]]; then
+            echo "Amiary app, backup, and restore access keys must be distinct." >&2
+            exit 1
+          fi
+          if [[ "${DEPLOY_AMIARY_SECRET_KEY}" == "${DEPLOY_AMIARY_BACKUP_SECRET_KEY}" ||
+                "${DEPLOY_AMIARY_SECRET_KEY}" == "${DEPLOY_AMIARY_RESTORE_SECRET_KEY}" ||
+                "${DEPLOY_AMIARY_BACKUP_SECRET_KEY}" == "${DEPLOY_AMIARY_RESTORE_SECRET_KEY}" ]]; then
+            echo "Amiary app, backup, and restore secret keys must be distinct." >&2
+            exit 1
+          fi
           deploy_env="${{ inputs.environment }}"
           bundle_root="${RUNNER_TEMP}/bundle"
           mkdir -p "${bundle_root}/envs/${deploy_env}"
           cp compose.yml "${bundle_root}/compose.yml"
           cp "envs/${deploy_env}/compose.yml" "${bundle_root}/envs/${deploy_env}/compose.yml"
           cp "envs/${deploy_env}/.env.minio" "${bundle_root}/envs/${deploy_env}/.env.minio"
+          mkdir -p "${bundle_root}/policies"
+          cp policies/amiary-app.json "${bundle_root}/policies/amiary-app.json"
+          cp policies/amiary-backup.json "${bundle_root}/policies/amiary-backup.json"
+          cp policies/amiary-restore.json "${bundle_root}/policies/amiary-restore.json"
+          mkdir -p "${bundle_root}/scripts"
+          cp scripts/provision-amiary.sh "${bundle_root}/scripts/provision-amiary.sh"
           env_minio="${bundle_root}/envs/${deploy_env}/.env.minio"
           env_minio_tmp=$(mktemp "${env_minio}.XXXXXX")
           trap 'rm -f "${env_minio_tmp}"' EXIT
@@ -70,6 +120,10 @@ jobs:
             printf 'MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=%s\n' "${DEPLOY_VIF_OBJECTS_NETWORK}" >> "${env_deploy}"
           fi
           chmod 600 "${env_minio}" "${env_deploy}"
+          printf '%s\n%s\n' "${DEPLOY_AMIARY_ACCESS_KEY}" "${DEPLOY_AMIARY_SECRET_KEY}" > "${bundle_root}/amiary-app.credentials"
+          printf '%s\n%s\n' "${DEPLOY_AMIARY_BACKUP_ACCESS_KEY}" "${DEPLOY_AMIARY_BACKUP_SECRET_KEY}" > "${bundle_root}/amiary-backup.credentials"
+          printf '%s\n%s\n' "${DEPLOY_AMIARY_RESTORE_ACCESS_KEY}" "${DEPLOY_AMIARY_RESTORE_SECRET_KEY}" > "${bundle_root}/amiary-restore.credentials"
+          chmod 600 "${bundle_root}"/amiary-*.credentials
 
       - name: Deploy via Docker Swarm
         shell: bash
@@ -88,11 +142,25 @@ jobs:
           fi
           bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
-          ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
-          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
+          ssh_opts=(-o StrictHostKeyChecking=yes -p "${remote_port}")
+          scp_opts=(-o StrictHostKeyChecking=yes -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
+          remote_app_credentials="${REMOTE_DIR}/amiary-app.credentials"
+          remote_backup_credentials="${REMOTE_DIR}/amiary-backup.credentials"
+          remote_restore_credentials="${REMOTE_DIR}/amiary-restore.credentials"
+          cleanup_credentials() {
+            rm -f "${bundle_root}"/amiary-*.credentials
+            # shellcheck disable=SC2029
+            ssh "${ssh_opts[@]}" "${remote_target}" rm -f -- \
+              "${remote_app_credentials}" "${remote_backup_credentials}" "${remote_restore_credentials}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_credentials EXIT
 
-          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/${{ inputs.environment }}"
+          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/${{ inputs.environment }}" "${REMOTE_DIR}/policies" "${REMOTE_DIR}/scripts"
+          # Remove residue from any previously interrupted run before upload.
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" rm -f -- \
+            "${remote_app_credentials}" "${remote_backup_credentials}" "${remote_restore_credentials}"
           scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.minio" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.minio"
@@ -101,6 +169,18 @@ jobs:
           scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
           # shellcheck disable=SC2029
           ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 "${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
+          scp "${scp_opts[@]}" "${bundle_root}/policies/amiary-app.json" "${remote_target}:${REMOTE_DIR}/policies/amiary-app.json"
+          scp "${scp_opts[@]}" "${bundle_root}/policies/amiary-backup.json" "${remote_target}:${REMOTE_DIR}/policies/amiary-backup.json"
+          scp "${scp_opts[@]}" "${bundle_root}/policies/amiary-restore.json" "${remote_target}:${REMOTE_DIR}/policies/amiary-restore.json"
+          scp "${scp_opts[@]}" "${bundle_root}/scripts/provision-amiary.sh" "${remote_target}:${REMOTE_DIR}/scripts/provision-amiary.sh"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 700 "${REMOTE_DIR}/scripts/provision-amiary.sh"
+          scp "${scp_opts[@]}" "${bundle_root}/amiary-app.credentials" "${remote_target}:${remote_app_credentials}"
+          scp "${scp_opts[@]}" "${bundle_root}/amiary-backup.credentials" "${remote_target}:${remote_backup_credentials}"
+          scp "${scp_opts[@]}" "${bundle_root}/amiary-restore.credentials" "${remote_target}:${remote_restore_credentials}"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 \
+            "${remote_app_credentials}" "${remote_backup_credentials}" "${remote_restore_credentials}"
 
           ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${STACK_NAME}" "${{ inputs.environment }}" <<'EOF'
           set -euo pipefail
@@ -109,6 +189,13 @@ jobs:
           deploy_env=$3
           env_minio="${remote_dir}/envs/${deploy_env}/.env.minio"
           env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
+          amiary_app_credentials="${remote_dir}/amiary-app.credentials"
+          amiary_backup_credentials="${remote_dir}/amiary-backup.credentials"
+          amiary_restore_credentials="${remote_dir}/amiary-restore.credentials"
+          cleanup_credentials() {
+            rm -f "${amiary_app_credentials}" "${amiary_backup_credentials}" "${amiary_restore_credentials}"
+          }
+          trap cleanup_credentials EXIT
           env_value() {
             local key=$1
             local file=$2
@@ -137,6 +224,7 @@ jobs:
           vif_objects_network=$(env_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${env_deploy}")
           catwlk_bucket=$(env_value MAKEPAD_MINIO_CATWLK_BUCKET "${env_minio}")
           vif_bucket=$(env_value MAKEPAD_MINIO_VIF_BUCKET "${env_minio}")
+          amiary_bucket=$(env_value MAKEPAD_MINIO_AMIARY_BUCKET "${env_minio}")
           minio_root_user=$(env_value MINIO_ROOT_USER "${env_minio}")
           minio_root_password=$(env_value MINIO_ROOT_PASSWORD "${env_minio}")
 
@@ -144,6 +232,38 @@ jobs:
           require_value MAKEPAD_MINIO_CATWLK_BUCKET "${catwlk_bucket}"
           require_value MINIO_ROOT_USER "${minio_root_user}"
           require_value MINIO_ROOT_PASSWORD "${minio_root_password}"
+          require_value MAKEPAD_MINIO_AMIARY_BUCKET "${amiary_bucket}"
+          [[ "${amiary_bucket}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] \
+            || { echo "Invalid Amiary bucket name." >&2; exit 1; }
+          credential_access_key() {
+            local path=$1 label=$2
+            local -a lines
+            mapfile -t lines < "${path}"
+            if ((${#lines[@]} != 2)) || [[ -z "${lines[0]}" ]] || ((${#lines[1]} < 32)); then
+              echo "Invalid Amiary ${label} credentials file." >&2
+              exit 1
+            fi
+            printf '%s' "${lines[0]}"
+          }
+          amiary_app_access_key=$(credential_access_key "${amiary_app_credentials}" app)
+          amiary_backup_access_key=$(credential_access_key "${amiary_backup_credentials}" backup)
+          amiary_restore_access_key=$(credential_access_key "${amiary_restore_credentials}" restore)
+          if [[ "${amiary_app_access_key}" == "${amiary_backup_access_key}" ||
+                "${amiary_app_access_key}" == "${amiary_restore_access_key}" ||
+                "${amiary_backup_access_key}" == "${amiary_restore_access_key}" ]]; then
+            echo "Amiary app, backup, and restore access keys must be distinct." >&2
+            exit 1
+          fi
+          amiary_app_secret_key=$(tail -n 1 "${amiary_app_credentials}")
+          amiary_backup_secret_key=$(tail -n 1 "${amiary_backup_credentials}")
+          amiary_restore_secret_key=$(tail -n 1 "${amiary_restore_credentials}")
+          if [[ "${amiary_app_secret_key}" == "${amiary_backup_secret_key}" ||
+                "${amiary_app_secret_key}" == "${amiary_restore_secret_key}" ||
+                "${amiary_backup_secret_key}" == "${amiary_restore_secret_key}" ]]; then
+            echo "Amiary app, backup, and restore secret keys must be distinct." >&2
+            exit 1
+          fi
+          unset amiary_app_secret_key amiary_backup_secret_key amiary_restore_secret_key
 
           vif_enabled=false
           if [[ "${deploy_env}" == "production" || -n "${vif_objects_network}" || -n "${vif_bucket}" ]]; then
@@ -159,51 +279,84 @@ jobs:
               || docker network create --driver overlay --attachable "${vif_objects_network}"
           fi
 
-          compose_env=("MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${objects_network}")
+          compose_env=(
+            "MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${objects_network}"
+          )
           if [[ "${vif_enabled}" == "true" ]]; then
             compose_env+=("MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${vif_objects_network}")
           fi
 
           umask 077
           stack_tmp=$(mktemp "${remote_dir}/stack.yml.XXXXXX")
-          trap 'rm -f "${stack_tmp}"' EXIT
-          env "${compose_env[@]}" docker compose \
+          if ! env "${compose_env[@]}" docker compose \
             --env-file "${env_minio}" \
             --env-file "${env_deploy}" \
             -f "${remote_dir}/compose.yml" \
             -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
-            config > "${stack_tmp}"
+            config > "${stack_tmp}"; then
+            rm -f "${stack_tmp}"
+            exit 1
+          fi
           chmod 600 "${stack_tmp}"
           mv "${stack_tmp}" "${remote_dir}/stack.yml"
           chmod 600 "${remote_dir}/stack.yml"
-          trap - EXIT
 
           docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
 
-          for attempt in $(seq 1 30); do
-            if docker run --rm --network "${objects_network}" minio/mc:latest \
-              alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
-              break
-            fi
-            sleep 2
-          done
-
-          docker run --rm --network "${objects_network}" minio/mc:latest \
-            alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
-          docker run --rm --network "${objects_network}" minio/mc:latest \
-            mb --ignore-existing "local/${catwlk_bucket}" >/dev/null
-          if [[ "${vif_enabled}" == "true" ]]; then
+          mc_image="minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+          ensure_bucket() {
+            local network=$1 host=$2 bucket=$3
             for attempt in $(seq 1 30); do
-              if docker run --rm --network "${vif_objects_network}" minio/mc:latest \
-                alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
+              if docker run --rm --network "${network}" \
+                --read-only --tmpfs /tmp:mode=0700 --tmpfs /root/.mc:mode=0700 \
+                --cap-drop ALL --security-opt no-new-privileges:true \
+                -e ADMIN_USER="${minio_root_user}" \
+                -e ADMIN_PASSWORD="${minio_root_password}" \
+                -e MINIO_HOST="${host}" \
+                --entrypoint /bin/sh "${mc_image}" -eu -c \
+                'mc alias set local "${MINIO_HOST}" "${ADMIN_USER}" "${ADMIN_PASSWORD}" >/dev/null && mc ready local >/dev/null'; then
                 break
+              fi
+              if ((attempt == 30)); then
+                echo "Timed out waiting for ${host}." >&2
+                exit 1
               fi
               sleep 2
             done
+            docker run --rm --network "${network}" \
+              --read-only --tmpfs /tmp:mode=0700 --tmpfs /root/.mc:mode=0700 \
+              --cap-drop ALL --security-opt no-new-privileges:true \
+              -e ADMIN_USER="${minio_root_user}" \
+              -e ADMIN_PASSWORD="${minio_root_password}" \
+              -e MINIO_HOST="${host}" \
+              -e BUCKET="${bucket}" \
+              --entrypoint /bin/sh "${mc_image}" -eu -c '
+                mc alias set local "${MINIO_HOST}" "${ADMIN_USER}" "${ADMIN_PASSWORD}" >/dev/null
+                mc mb --ignore-existing "local/${BUCKET}" >/dev/null
+              '
+          }
 
-            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
-              alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
-            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
-              mb --ignore-existing "local/${vif_bucket}" >/dev/null
+          ensure_bucket "${objects_network}" http://makepad-minio:9000 "${catwlk_bucket}"
+          # Provisioning is an operator-side control-plane action on the existing
+          # MinIO management network. It does not grant the Amiary application
+          # data-plane connectivity; that remains blocked until a private,
+          # certificate-verified TLS endpoint is provisioned.
+          provision_amiary_identity() {
+            local purpose=$1 credentials=$2 policy_template=$3
+            AMIARY_MINIO_NETWORK="${objects_network}" \
+            AMIARY_MINIO_HOST=http://makepad-minio:9000 \
+            AMIARY_MINIO_BUCKET="${amiary_bucket}" \
+            AMIARY_MINIO_POLICY_NAME="amiary-${deploy_env}-${purpose}" \
+            AMIARY_MINIO_ADMIN_USER="${minio_root_user}" \
+            AMIARY_MINIO_ADMIN_PASSWORD="${minio_root_password}" \
+            AMIARY_MINIO_CREDENTIALS_FILE="${credentials}" \
+            AMIARY_MINIO_POLICY_TEMPLATE="${policy_template}" \
+              "${remote_dir}/scripts/provision-amiary.sh"
+          }
+          provision_amiary_identity app "${amiary_app_credentials}" "${remote_dir}/policies/amiary-app.json"
+          provision_amiary_identity backup "${amiary_backup_credentials}" "${remote_dir}/policies/amiary-backup.json"
+          provision_amiary_identity restore "${amiary_restore_credentials}" "${remote_dir}/policies/amiary-restore.json"
+          if [[ "${vif_enabled}" == "true" ]]; then
+            ensure_bucket "${vif_objects_network}" http://makepad-minio-vif:9000 "${vif_bucket}"
           fi
           EOF
