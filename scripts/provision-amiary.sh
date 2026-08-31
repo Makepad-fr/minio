@@ -38,6 +38,11 @@ cleanup() {
 }
 trap cleanup EXIT
 sed "s/AMIARY_BUCKET/${AMIARY_MINIO_BUCKET}/g" "${AMIARY_MINIO_POLICY_TEMPLATE}" > "${policy_file}"
+# The pinned mc image runs unprivileged. Docker Desktop transparently maps the
+# bind mount, while native Linux preserves the host UID and mktemp's 0600 mode.
+# The rendered policy contains no credentials, so make only this temporary
+# policy world-readable for the duration of the read-only container mount.
+chmod 0444 "${policy_file}"
 
 for attempt in $(seq 1 30); do
   if docker run --rm --network "${AMIARY_MINIO_NETWORK}" \
