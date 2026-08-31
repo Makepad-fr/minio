@@ -8,11 +8,15 @@ suffix=$$
 network="amiary-minio-test-${suffix}"
 container="amiary-minio-test-${suffix}"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/amiary-minio-test.XXXXXX")
+client_credentials_dir="${work_dir}/client-credentials"
 mc_image='minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
 
 cleanup() {
   docker rm -f "${container}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
+  chmod 0700 "${client_credentials_dir}" >/dev/null 2>&1 || true
+  rm -f "${client_credentials_dir}"/*.credentials
+  rmdir "${client_credentials_dir}" >/dev/null 2>&1 || true
   rm -f "${work_dir}"/*.credentials
   rmdir "${work_dir}" >/dev/null 2>&1 || true
 }
@@ -22,6 +26,14 @@ printf '%s\n%s\n' 'amiary-test-app' 'test-only-app-secret-key-at-least-32-charac
 printf '%s\n%s\n' 'amiary-test-backup' 'test-only-backup-secret-key-at-least-32-characters' > "${work_dir}/backup.credentials"
 printf '%s\n%s\n' 'amiary-test-restore' 'test-only-restore-secret-key-at-least-32-characters' > "${work_dir}/restore.credentials"
 chmod 600 "${work_dir}"/*.credentials
+
+# Keep the source fixtures private, matching the production credential mode.
+# The policy probe itself runs as a numeric, unprivileged user, so give only
+# that disposable container separate read-only copies of these test values.
+mkdir "${client_credentials_dir}"
+cp "${work_dir}"/*.credentials "${client_credentials_dir}/"
+chmod 0555 "${client_credentials_dir}"
+chmod 0444 "${client_credentials_dir}"/*.credentials
 
 docker network create "${network}" >/dev/null
 docker run -d --rm --name "${container}" --network "${network}" \
@@ -52,11 +64,10 @@ run_provisioning restore
 # cannot create, replace, or delete them. Restore remains a separate explicit
 # identity with the exact write/delete permissions needed for a mirror restore.
 docker run --rm --network "${network}" \
-  --read-only --tmpfs /tmp:mode=0700 --tmpfs /root/.mc:mode=0700 \
+  --user 65532:65532 \
+  --read-only --tmpfs /tmp:mode=0700,uid=65532,gid=65532 \
   --cap-drop ALL --security-opt no-new-privileges:true \
-  -v "${work_dir}/app.credentials:/run/secrets/app.credentials:ro" \
-  -v "${work_dir}/backup.credentials:/run/secrets/backup.credentials:ro" \
-  -v "${work_dir}/restore.credentials:/run/secrets/restore.credentials:ro" \
+  -v "${client_credentials_dir}:/run/secrets:ro" \
   -e MINIO_HOST=http://makepad-minio-amiary:9000 \
   --entrypoint /bin/sh "${mc_image}" -eu -c '
     alias_from_file() {
