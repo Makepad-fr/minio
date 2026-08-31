@@ -1,0 +1,48 @@
+name: Amiary MinIO Contract
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/amiary-contract.yml"
+      - "README.md"
+      - "compose.yml"
+      - "config/**"
+      - "envs/**"
+      - "policies/**"
+      - "scripts/**"
+      - "systemd/**"
+
+concurrency:
+  group: amiary-minio-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Amiary provisioning and backup contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+
+      - name: ShellCheck
+        timeout-minutes: 2
+        run: shellcheck scripts/*.sh
+
+      - name: Static backup contract
+        timeout-minutes: 2
+        run: timeout 90s bash scripts/test-amiary-backup-static.sh
+
+      - name: Disposable provisioning contract
+        timeout-minutes: 5
+        run: timeout 4m bash scripts/test-amiary-provisioning.sh
+
+      - name: Disposable backup and restore contract
+        timeout-minutes: 10
+        run: timeout 8m bash scripts/test-amiary-backup-disposable.sh
