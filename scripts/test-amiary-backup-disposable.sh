@@ -18,13 +18,28 @@ storage_mount="${work_dir}/storagebox"
 backup_root="${storage_mount}/amiary-minio"
 restore_work="${work_dir}/restore-work"
 mc_image='minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+test_uid=$(id -u)
+test_gid=$(id -g)
+test_phase=initialization
+
+report_error() {
+  local line=$1 status=$2
+  trap - ERR
+  printf 'Amiary MinIO disposable contract failed during %s at line %s (status %s).\n' \
+    "${test_phase}" "${line}" "${status}" >&2
+  return "${status}"
+}
+trap 'report_error "${LINENO}" "$?"' ERR
 
 cleanup() {
+  local status=$?
+  trap - ERR EXIT
   docker rm -f "${container}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
   if [[ "${work_dir}" == "${TMPDIR:-/tmp}/amiary-backup-test."* && -d "${work_dir}" && ! -L "${work_dir}" ]]; then
-    rm -rf -- "${work_dir}"
+    rm -rf -- "${work_dir}" || true
   fi
+  exit "${status}"
 }
 trap cleanup EXIT
 
@@ -48,6 +63,7 @@ docker run -d --rm --name "${container}" --network "${network}" \
   minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
   server /data >/dev/null
 
+test_phase='identity provisioning'
 provision_identity() {
   local purpose=$1 credentials=$2
   AMIARY_MINIO_NETWORK="${network}" \
@@ -64,8 +80,11 @@ provision_identity app "${app_credentials}"
 provision_identity backup "${backup_credentials}"
 provision_identity restore "${restore_credentials}"
 
+test_phase='initial app upload'
 docker run --rm --network "${network}" \
-  --read-only --tmpfs /tmp:mode=0700 --cap-drop ALL --security-opt no-new-privileges:true \
+  --user "${test_uid}:${test_gid}" \
+  --read-only --tmpfs "/tmp:mode=0700,uid=${test_uid},gid=${test_gid}" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --volume "${app_credentials}:/run/secrets/amiary-app.credentials:ro" \
   --volume "${source_files}:/payload:ro" \
   --env MINIO_HOST=http://makepad-minio-amiary:9000 --env BUCKET="${bucket}" \
@@ -79,8 +98,11 @@ docker run --rm --network "${network}" \
 
 # Scheduled backup credentials must be able to list/read the ciphertext but
 # must fail closed for both writes and deletes.
+test_phase='backup policy probe'
 docker run --rm --network "${network}" \
-  --read-only --tmpfs /tmp:mode=0700 --cap-drop ALL --security-opt no-new-privileges:true \
+  --user "${test_uid}:${test_gid}" \
+  --read-only --tmpfs "/tmp:mode=0700,uid=${test_uid},gid=${test_gid}" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --volume "${backup_credentials}:/run/secrets/amiary-backup.credentials:ro" \
   --volume "${source_files}:/payload:ro" \
   --env MINIO_HOST=http://makepad-minio-amiary:9000 --env BUCKET="${bucket}" \
@@ -115,18 +137,23 @@ export AMIARY_STORAGEBOX_AT_REST_ENCRYPTION_CONFIRMED=true
 export AMIARY_BACKUP_RETENTION_DAYS=35
 export AMIARY_RESTORE_WORK_DIR="${restore_work}"
 
+test_phase='snapshot backup'
 "${script_dir}/backup-amiary-bucket.sh" >/dev/null
 snapshots=("${backup_root}"/snapshots/*)
 test "${#snapshots[@]}" -eq 1
 snapshot_id=${snapshots[0]##*/}
+test_phase='snapshot verification'
 "${script_dir}/verify-amiary-backup.sh" "${snapshot_id}" >/dev/null
 
 # Change every aspect of the current set: overwrite one object, delete one,
 # and add one. Restore must return exactly to the snapshot.
 head -c 313 /dev/urandom > "${source_files}/profiles/a/photo.enc"
 head -c 197 /dev/urandom > "${source_files}/extra.enc"
+test_phase='source mutation'
 docker run --rm --network "${network}" \
-  --read-only --tmpfs /tmp:mode=0700 --cap-drop ALL --security-opt no-new-privileges:true \
+  --user "${test_uid}:${test_gid}" \
+  --read-only --tmpfs "/tmp:mode=0700,uid=${test_uid},gid=${test_gid}" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --volume "${app_credentials}:/run/secrets/amiary-app.credentials:ro" \
   --volume "${source_files}:/payload:ro" \
   --env MINIO_HOST=http://makepad-minio-amiary:9000 --env BUCKET="${bucket}" \
@@ -143,10 +170,14 @@ docker run --rm --network "${network}" \
 export AMIARY_RESTORE_CONFIRM_PRODUCTION_BUCKET="${bucket}"
 export AMIARY_RESTORE_CONFIRM_REPLACE_CURRENT_OBJECTS=REPLACE_AMIARY_PRODUCTION_OBJECTS
 export AMIARY_RESTORE_CONFIRM_WRITES_PAUSED=AMIARY_WRITES_ARE_PAUSED
+test_phase='snapshot restore'
 "${script_dir}/restore-amiary-bucket.sh" "${snapshot_id}" >/dev/null
 
+test_phase='restored state download'
 docker run --rm --network "${network}" \
-  --read-only --tmpfs /tmp:mode=0700 --cap-drop ALL --security-opt no-new-privileges:true \
+  --user "${test_uid}:${test_gid}" \
+  --read-only --tmpfs "/tmp:mode=0700,uid=${test_uid},gid=${test_gid}" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --volume "${backup_credentials}:/run/secrets/amiary-backup.credentials:ro" \
   --volume "${restored_files}:/result" \
   --env MINIO_HOST=http://makepad-minio-amiary:9000 --env BUCKET="${bucket}" \
@@ -158,6 +189,7 @@ docker run --rm --network "${network}" \
     mc mirror --quiet "app/${BUCKET}/" /result/ >/dev/null 2>&1
   ' >/dev/null 2>&1
 
+test_phase='restored state verification'
 actual_a=$(sha256sum < "${restored_files}/profiles/a/photo.enc")
 actual_a=${actual_a%% *}
 actual_b=$(sha256sum < "${restored_files}/profiles/b/photo.enc")
@@ -167,6 +199,7 @@ test "${actual_b}" = "${expected_b}"
 test ! -e "${restored_files}/extra.enc"
 
 # Corruption must be detected without emitting the object path or content.
+test_phase='corruption detection'
 first_snapshot_object=$(find "${snapshots[0]}/objects" -type f -print -quit)
 printf 'x' >> "${first_snapshot_object}"
 if "${script_dir}/verify-amiary-backup.sh" "${snapshot_id}" >/dev/null 2>&1; then
@@ -175,6 +208,7 @@ if "${script_dir}/verify-amiary-backup.sh" "${snapshot_id}" >/dev/null 2>&1; the
 fi
 
 # Retention deletes only complete, timestamp-named snapshot directories.
+test_phase='retention enforcement'
 old_snapshot="${backup_root}/snapshots/20000101T000000Z"
 mkdir -p "${old_snapshot}/objects"
 for marker in manifest.json SHA256SUMS.nul source-inventory.jsonl CONTROL.SHA256SUMS COMPLETE; do

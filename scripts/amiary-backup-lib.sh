@@ -41,6 +41,22 @@ stat_mode() {
   fi
 }
 
+stat_uid() {
+  if stat -c '%u' "$1" >/dev/null 2>&1; then
+    stat -c '%u' "$1"
+  else
+    stat -f '%u' "$1"
+  fi
+}
+
+stat_gid() {
+  if stat -c '%g' "$1" >/dev/null 2>&1; then
+    stat -c '%g' "$1"
+  else
+    stat -f '%g' "$1"
+  fi
+}
+
 file_size() {
   if stat -c '%s' "$1" >/dev/null 2>&1; then
     stat -c '%s' "$1"
@@ -76,17 +92,25 @@ validate_bucket_scope() {
 
 validate_credentials_file() {
   local path=${1:-} label=${2:-MinIO}
-  local mode permission_digits group_digit other_digit line_count first_length second_length
+  local mode permission_digits line_count first_length second_length
+  local owner_uid owner_gid runtime_uid runtime_gid
+  require_command id
+  require_command stat
   [[ -n "${path}" ]] || die "${label} credential path is empty"
   [[ "${path}" == /* ]] || die "${label} credential path must be absolute"
   [[ -f "${path}" && ! -L "${path}" && -r "${path}" ]] || die "${label} credential file must be a readable regular non-symlink file"
 
   mode=$(stat_mode "${path}")
   permission_digits=${mode: -3}
-  group_digit=${permission_digits:1:1}
-  other_digit=${permission_digits:2:1}
-  (( (8#${group_digit} & 4) == 0 && (8#${other_digit} & 4) == 0 )) \
-    || die "${label} credential file must not be group- or other-readable"
+  [[ "${permission_digits}" == 400 || "${permission_digits}" == 600 ]] \
+    || die "${label} credential file mode must be 0400 or 0600"
+
+  owner_uid=$(stat_uid "${path}")
+  owner_gid=$(stat_gid "${path}")
+  runtime_uid=$(id -u)
+  runtime_gid=$(id -g)
+  [[ "${owner_uid}" == "${runtime_uid}" && "${owner_gid}" == "${runtime_gid}" ]] \
+    || die "${label} credential file must be owned by the current service identity"
 
   line_count=$(awk 'END { print NR }' "${path}")
   [[ "${line_count}" == 2 ]] || die "${label} credential file must contain exactly two lines"
@@ -94,6 +118,19 @@ validate_credentials_file() {
   second_length=$(awk 'NR == 2 { sub(/\r$/, ""); print length; exit }' "${path}")
   ((first_length > 0)) || die "${label} credential access key is empty"
   ((second_length >= 32)) || die "${label} credential secret key must contain at least 32 characters"
+}
+
+validate_owned_directory() {
+  local path=${1:-} label=${2:-directory}
+  local owner_uid owner_gid runtime_uid runtime_gid
+  [[ -d "${path}" && ! -L "${path}" && -w "${path}" ]] \
+    || die "${label} must be a writable, non-symlink directory"
+  owner_uid=$(stat_uid "${path}")
+  owner_gid=$(stat_gid "${path}")
+  runtime_uid=$(id -u)
+  runtime_gid=$(id -g)
+  [[ "${owner_uid}" == "${runtime_uid}" && "${owner_gid}" == "${runtime_gid}" ]] \
+    || die "${label} must be owned by the current service identity"
 }
 
 validate_minio_config() {

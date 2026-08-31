@@ -145,8 +145,16 @@ sudo install -d -o makepad-minio-backup -g makepad-minio-backup -m 0700 /etc/mak
 sudo install -m 0600 config/amiary-minio-backup.env.example /etc/makepad/amiary-minio-backup.env
 sudo install -o makepad-minio-backup -g makepad-minio-backup -m 0400 /secure/operator/path/amiary-backup.credentials /etc/makepad/secrets/minio/backup/amiary.credentials
 sudo install -d -o makepad-minio-backup -g makepad-minio-backup -m 0700 /mnt/makepad-storagebox/amiary-minio
-sudo install -d -o makepad-minio-backup -g makepad-minio-backup -m 0700 /var/lib/makepad/amiary-minio-restore
+sudo install -d -o root -g root -m 0700 /var/lib/makepad/amiary-minio-restore
 ```
+
+The backup credential and backup root must be owned by the timer's primary
+user and group. The just-in-time restore credential and restore work directory
+must likewise be owned by the root operator identity used by the restore
+runbook. The entrypoints reject ownership drift, then run each `mc` container
+as that exact numeric UID/GID with a private, identity-owned tmpfs. This keeps
+the production credentials at `0400` while allowing neither container root nor
+an unrelated host identity to become an implicit credential reader.
 
 Set the existing MinIO management-network name and set both Storage Box confirmations to
 `true` only after verifying those controls. Never put access or secret keys in

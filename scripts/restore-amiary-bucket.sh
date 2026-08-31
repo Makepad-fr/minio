@@ -11,6 +11,9 @@ validate_snapshot_id "${snapshot_id}"
 validate_restore_minio_config
 validate_storage_config
 
+container_uid=$(stat_uid "${AMIARY_MINIO_RESTORE_CREDENTIALS_FILE}")
+container_gid=$(stat_gid "${AMIARY_MINIO_RESTORE_CREDENTIALS_FILE}")
+
 [[ "${AMIARY_RESTORE_CONFIRM_PRODUCTION_BUCKET:-}" == "${AMIARY_MINIO_BUCKET}" ]] \
   || die "set AMIARY_RESTORE_CONFIRM_PRODUCTION_BUCKET to the exact target bucket"
 [[ "${AMIARY_RESTORE_CONFIRM_REPLACE_CURRENT_OBJECTS:-}" == REPLACE_AMIARY_PRODUCTION_OBJECTS ]] \
@@ -25,6 +28,7 @@ mkdir -p "${AMIARY_RESTORE_WORK_DIR}"
 [[ -d "${AMIARY_RESTORE_WORK_DIR}" && ! -L "${AMIARY_RESTORE_WORK_DIR}" ]] \
   || die "restore verification work directory is invalid"
 AMIARY_RESTORE_WORK_DIR=$(canonical_directory "${AMIARY_RESTORE_WORK_DIR}")
+validate_owned_directory "${AMIARY_RESTORE_WORK_DIR}" "restore verification work directory"
 
 snapshot=$(snapshot_directory "${snapshot_id}")
 operation_lock="${AMIARY_BACKUP_ROOT}/.operation.lock"
@@ -42,6 +46,7 @@ trap cleanup EXIT
 
 verify_snapshot "${snapshot}"
 mkdir -p "${verification_snapshot}/objects"
+validate_owned_directory "${verification_snapshot}" "restore verification staging directory"
 
 # Replace the current bucket view with the verified encrypted-object set. The
 # source bucket is versioned, so deletes create versions, but this remains a
@@ -49,8 +54,9 @@ mkdir -p "${verification_snapshot}/objects"
 set +e
 docker run --rm \
   --network "${AMIARY_MINIO_NETWORK}" \
+  --user "${container_uid}:${container_gid}" \
   --read-only \
-  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,mode=0700 \
+  --tmpfs "/tmp:rw,nosuid,nodev,noexec,size=32m,mode=0700,uid=${container_uid},gid=${container_gid}" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --volume "${AMIARY_MINIO_RESTORE_CREDENTIALS_FILE}:/run/secrets/amiary-restore.credentials:ro" \
@@ -68,15 +74,17 @@ docker run --rm \
   ' >/dev/null 2>&1
 restore_status=$?
 set -e
-[[ "${restore_status}" == 0 ]] || die "Amiary restore failed; keep writes paused and inspect the target before retrying"
+[[ "${restore_status}" == 0 ]] \
+  || die "Amiary restore container failed with status ${restore_status}; keep writes paused and inspect the target before retrying"
 
 # Download the resulting current state without printing names/content and check
 # every encrypted object against the pre-restore snapshot manifest.
 set +e
 docker run --rm \
   --network "${AMIARY_MINIO_NETWORK}" \
+  --user "${container_uid}:${container_gid}" \
   --read-only \
-  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m,mode=0700 \
+  --tmpfs "/tmp:rw,nosuid,nodev,noexec,size=32m,mode=0700,uid=${container_uid},gid=${container_gid}" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --volume "${AMIARY_MINIO_RESTORE_CREDENTIALS_FILE}:/run/secrets/amiary-restore.credentials:ro" \
@@ -112,7 +120,7 @@ docker run --rm \
 verification_download_status=$?
 set -e
 [[ "${verification_download_status}" == 0 ]] \
-  || die "post-restore verification could not capture a stable bucket; keep writes paused"
+  || die "post-restore verification container failed with status ${verification_download_status}; keep writes paused"
 
 for control_file in manifest.json SHA256SUMS.nul source-inventory.jsonl CONTROL.SHA256SUMS COMPLETE; do
   cp "${snapshot}/${control_file}" "${verification_snapshot}/${control_file}"

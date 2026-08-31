@@ -36,15 +36,24 @@ grep -Fq 'AMIARY_BACKUP_RETENTION_DAYS=${AMIARY_BACKUP_RETENTION_DAYS:-35}' "${l
 grep -Fq 'client-side-encrypted-objects' "${lib}"
 grep -Fq 'SHA256SUMS.nul' "${lib}"
 grep -Fq 'CONTROL.SHA256SUMS' "${lib}"
+grep -Fq 'stat_uid()' "${lib}"
+grep -Fq 'stat_gid()' "${lib}"
+grep -Fq 'credential file mode must be 0400 or 0600' "${lib}"
+grep -Fq 'credential file must be owned by the current service identity' "${lib}"
+grep -Fq 'validate_owned_directory()' "${lib}"
 
 grep -Fq '00,06,12,18:15:00 UTC' "${timer}"
 grep -Fq 'Persistent=true' "${timer}"
 grep -Fq 'ConditionPathIsMountPoint=/mnt/makepad-storagebox' "${service}"
+grep -Fq 'User=makepad-minio-backup' "${service}"
+grep -Fq 'Group=makepad-minio-backup' "${service}"
 grep -Fq 'NoNewPrivileges=true' "${service}"
 grep -Fq 'AMIARY_BACKUP_RETENTION_DAYS=35' "${env_example}"
 grep -Fq 'AMIARY_MINIO_BACKUP_CREDENTIALS_FILE=' "${env_example}"
 grep -Fq 'AMIARY_MINIO_RESTORE_CREDENTIALS_FILE=' "${env_example}"
 grep -Fq '/etc/makepad/secrets/minio/backup/amiary.credentials' "${service}"
+grep -Fq -- '-o makepad-minio-backup -g makepad-minio-backup -m 0400' "${readme}"
+grep -Fq -- '-o root -g root -m 0400' "${readme}"
 if grep -Fq 'amiary-minio-restore.credentials' "${service}"; then
   echo "scheduled backup service must not be granted the manual restore credential" >&2
   exit 1
@@ -94,6 +103,11 @@ grep -Fq 'verify_snapshot "${verification_snapshot}"' "${restore}"
 
 for hardened_script in "${backup}" "${restore}"; do
   grep -Fq -- '--read-only' "${hardened_script}"
+  # These validate literal container-side variable expansions.
+  # shellcheck disable=SC2016
+  grep -Fq -- '--user "${container_uid}:${container_gid}"' "${hardened_script}"
+  # shellcheck disable=SC2016
+  grep -Fq 'mode=0700,uid=${container_uid},gid=${container_gid}' "${hardened_script}"
   grep -Fq -- '--cap-drop ALL' "${hardened_script}"
   grep -Fq -- '--security-opt no-new-privileges:true' "${hardened_script}"
   if grep -Eq -- '--env[[:space:]]+[^=]*(ACCESS|SECRET|PASSWORD|CREDENTIAL)' "${hardened_script}"; then
@@ -105,6 +119,10 @@ for hardened_script in "${backup}" "${restore}"; do
     exit 1
   fi
 done
+# This validates a literal test-container identity expansion.
+# shellcheck disable=SC2016
+test "$(grep -Fc -- '--user "${test_uid}:${test_gid}"' "${script_dir}/test-amiary-backup-disposable.sh")" -eq 4
+grep -Fq 'disposable contract failed during' "${script_dir}/test-amiary-backup-disposable.sh"
 # These validate the literal variable expansion in the entrypoint source.
 # shellcheck disable=SC2016
 grep -Fq '${AMIARY_MINIO_BACKUP_CREDENTIALS_FILE}:/run/secrets/amiary-backup.credentials:ro' "${backup}"
