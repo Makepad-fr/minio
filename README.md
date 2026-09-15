@@ -70,3 +70,10 @@ The workflow deploys only the MinIO stack. If a required objects network does no
 ## Makepad Scan
 
 Scanner assets use private bucket makepad-scan on the existing storage VM. Apply policies/makepad-scan.json to a dedicated service user. Public bucket access is forbidden. The existing host deployment is accessed over the private WireGuard path; do not introduce another MinIO instance.
+
+Provision the scanner on the existing host with `scripts/provision-makepad-scan.sh`.
+Supply the existing root credentials and a dedicated `SCAN_STORAGE_PASSWORD`
+through protected environment files. The script creates only `makepad-scan` and
+`makepad-scan-app`, disables anonymous access and attaches the scoped policy.
+It never resets an existing user's password. Keep the password in the Makepad
+vault; the application consumes it as a Swarm secret.
