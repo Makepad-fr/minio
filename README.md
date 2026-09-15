@@ -66,3 +66,7 @@ Required production-only environment secret:
 The tracked `envs/<environment>/.env.minio` files intentionally leave `MINIO_ROOT_PASSWORD` empty. During deployment, the workflow copies the selected env file into a temporary bundle and injects `DEPLOY_MINIO_ROOT_PASSWORD` into that bundle before uploading it to the target host. If the secret is absent, the workflow fails before writing or uploading an empty password.
 
 The workflow deploys only the MinIO stack. If a required objects network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated. Production deploys additionally create the VIF network when needed and ensure the VIF bucket exists.
+
+## Makepad Scan
+
+Scanner assets use private bucket makepad-scan on the existing storage VM. Apply policies/makepad-scan.json to a dedicated service user. Public bucket access is forbidden. The existing host deployment is accessed over the private WireGuard path; do not introduce another MinIO instance.
