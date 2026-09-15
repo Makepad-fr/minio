@@ -77,3 +77,10 @@ through protected environment files. The script creates only `makepad-scan` and
 `makepad-scan-app`, disables anonymous access and attaches the scoped policy.
 It never resets an existing user's password. Keep the password in the Makepad
 vault; the application consumes it as a Swarm secret.
+
+`MinIO scanner contracts` runs on the owning self-hosted Linux runner. The
+policy stage validates the bucket boundary; the provisioning stage additionally
+starts a disposable pinned MinIO container and verifies repeatability, protected
+access and credential retention. It does not touch hosted buckets. Replacing the
+stale Amiary check requirement with this check needs an explicit repository-owner
+decision; this PR does not modify branch protection.
