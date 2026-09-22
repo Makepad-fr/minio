@@ -103,3 +103,8 @@ The live storage host currently uses standalone host-network containers. This
 additive provisioning script does not redeploy the shared stack. Restrict
 Visitaki access to the existing private application-to-database path; do not
 open the S3 port publicly or change neighboring application policies.
+
+Run `scripts/test-visitaki-policy.sh` against an available Docker context to
+verify upload/read/delete and denial of unrelated-bucket and admin access. It
+uses a pinned MinIO image, synthetic credentials, no network, and no host ports.
+The Visitaki storage isolation PR check runs this on the Makepad Linux runner.
