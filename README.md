@@ -84,3 +84,22 @@ starts a disposable pinned MinIO container and verifies repeatability, protected
 access and credential retention. It does not touch hosted buckets. Replacing the
 stale Amiary check requirement with this check needs an explicit repository-owner
 decision; this PR does not modify branch protection.
+
+## Visitaki restricted preview
+
+`policies/visitaki-preview.json` scopes the `visitaki-preview-app` identity to
+one private bucket, `visitaki-preview`. Production campaign inventory must use
+separate storage when the public launch gate is met. No anonymous object access
+is enabled; the application serves only reviewed public campaign images.
+
+On the storage host, run `scripts/provision-visitaki-preview.sh` with
+`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and a vault-managed
+`VISITAKI_STORAGE_PASSWORD` (at least 32 characters). The script uses a temporary
+private mc configuration, does not rotate an existing user's password, and
+verifies authentication with the supplied application credential. If that check
+fails, stop and reconcile the vault; do not reset another user's credentials.
+
+The live storage host currently uses standalone host-network containers. This
+additive provisioning script does not redeploy the shared stack. Restrict
+Visitaki access to the existing private application-to-database path; do not
+open the S3 port publicly or change neighboring application policies.
