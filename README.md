@@ -107,4 +107,5 @@ open the S3 port publicly or change neighboring application policies.
 Run `scripts/test-visitaki-policy.sh` against an available Docker context to
 verify upload/read/delete and denial of unrelated-bucket and admin access. It
 uses a pinned MinIO image, synthetic credentials, no network, and no host ports.
-The Visitaki storage isolation PR check runs this on the Makepad Linux runner.
+The Visitaki storage isolation PR check runs on a GitHub-hosted Linux runner;
+this public repository does not receive shared infrastructure-runner access.

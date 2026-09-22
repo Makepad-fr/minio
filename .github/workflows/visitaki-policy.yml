@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   policy:
-    runs-on: [self-hosted, Linux, X64, makepad]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
