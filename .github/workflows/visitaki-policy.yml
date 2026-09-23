@@ -1,0 +1,15 @@
+name: Visitaki storage isolation
+on:
+  pull_request:
+    paths: ['policies/visitaki-preview.json', 'scripts/*visitaki*', '.github/workflows/visitaki-policy.yml']
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - run: scripts/test-visitaki-policy.sh
