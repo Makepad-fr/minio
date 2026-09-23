@@ -1,7 +1,7 @@
 name: Visitaki storage isolation
 on:
   pull_request:
-    paths: ['policies/visitaki-preview.json', 'scripts/*visitaki*', '.github/workflows/visitaki-policy.yml']
+    paths: ['policies/visitaki-preview.json', 'scripts/*visitaki*', 'systemd/visitaki-*', '.github/workflows/visitaki-policy.yml']
 permissions:
   contents: read
 jobs:
@@ -13,3 +13,4 @@ jobs:
         with:
           persist-credentials: false
       - run: scripts/test-visitaki-policy.sh
+      - run: python3 scripts/test-visitaki-backup.py

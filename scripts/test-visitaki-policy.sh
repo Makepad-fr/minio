@@ -27,6 +27,10 @@ docker exec "$name" sh -eu -c '
  if mc ls app/unrelated-fixture >/dev/null 2>&1; then exit 1; fi
  if mc cp /tmp/object app/unrelated-fixture/test >/dev/null 2>&1; then exit 1; fi
  if mc admin user list app >/dev/null 2>&1; then exit 1; fi
- mc rm app/visitaki-preview/test >/dev/null
+mc mirror app/visitaki-preview /tmp/visitaki-snapshot >/dev/null
+mc mb admin/visitaki-restore-fixture >/dev/null
+mc mirror /tmp/visitaki-snapshot admin/visitaki-restore-fixture >/dev/null
+test "$(mc cat admin/visitaki-restore-fixture/test)" = synthetic
+mc rm app/visitaki-preview/test >/dev/null
  '
 printf '%s\n' 'Visitaki bucket round trip passed; unrelated bucket and admin access denied.'
