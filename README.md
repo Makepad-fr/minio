@@ -109,3 +109,24 @@ verify upload/read/delete and denial of unrelated-bucket and admin access. It
 uses a pinned MinIO image, synthetic credentials, no network, and no host ports.
 The Visitaki storage isolation PR check runs on a GitHub-hosted Linux runner;
 this public repository does not receive shared infrastructure-runner access.
+# Visitaki object backup
+
+On `db-server-1`, `scripts/visitaki-encrypted-backup.py backup` reads only the
+`visitaki-preview` bucket and writes an encrypted snapshot to the existing MinIO
+Restic repository. Credentials remain inside the existing MinIO container and
+the root-owned Restic environment file. Temporary plaintext objects are removed
+after the attempt; repository snapshots and shared retention are unchanged.
+
+The pilot normalizes uploaded campaign images to JPEG, with their MIME type and
+object references in PostgreSQL. This backup preserves current object keys and
+bytes. Database references require the separate Visitaki PostgreSQL backup;
+storage users and bucket policies are provisioned from reviewed configuration.
+
+Run `restore --snapshot <id>` to retrieve the encrypted snapshot, verify its
+manifest, restore it to an isolated MinIO container with no network or published
+ports, and compare every object after a second download. Use a synthetic private
+test object to prove a nonempty restore during initial activation. Only after
+that succeeds, install the script as
+`/srv/makepad/visitaki-backups/visitaki-minio-backup.py` and enable the two
+`systemd/visitaki-minio-backup.*` units. Root-owned receipts are stored under
+`/var/lib/makepad/visitaki-minio-backup`.
