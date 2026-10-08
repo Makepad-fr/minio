@@ -9,7 +9,7 @@ network="amiary-minio-test-${suffix}"
 container="amiary-minio-test-${suffix}"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/amiary-minio-test.XXXXXX")
 client_credentials_dir="${work_dir}/client-credentials"
-mc_image='minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+mc_image='ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b'
 
 cleanup() {
   docker rm -f "${container}" >/dev/null 2>&1 || true
@@ -40,7 +40,7 @@ docker run -d --rm --name "${container}" --network "${network}" \
   --network-alias makepad-minio-amiary \
   -e MINIO_ROOT_USER=test-root-user \
   -e MINIO_ROOT_PASSWORD=test-root-password-at-least-32-chars \
-  minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+  ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b \
   server /data >/dev/null
 
 run_provisioning() {
@@ -56,6 +56,9 @@ run_provisioning() {
     "${repo_root}/scripts/provision-amiary.sh"
 }
 
+run_provisioning app
+run_provisioning backup
+run_provisioning restore
 run_provisioning app
 run_provisioning backup
 run_provisioning restore
@@ -98,7 +101,7 @@ docker run --rm --network "${network}" \
   '
 
 # Inject both direct-policy and group-membership drift into the backup identity.
-# Reprovisioning must recreate it and converge to only the read-only policy.
+# Reprovisioning must reject drift without deleting or resetting credentials.
 docker run --rm --network "${network}" \
   --read-only --tmpfs /tmp:mode=0700 --tmpfs /root/.mc:mode=0700 \
   --cap-drop ALL --security-opt no-new-privileges:true \
@@ -112,9 +115,12 @@ docker run --rm --network "${network}" \
     mc admin group add local amiary-unexpected-group amiary-test-backup >/dev/null
     mc admin policy attach local writeonly --group amiary-unexpected-group >/dev/null
   '
-run_provisioning backup
+if run_provisioning backup >/dev/null 2>&1; then
+  echo "Unexpected policy/group drift was accepted" >&2
+  exit 1
+fi
 
-for purpose in app backup restore; do
+for purpose in app restore; do
   user_info=$(docker run --rm --network "${network}" \
     --read-only --tmpfs /tmp:mode=0700 --tmpfs /root/.mc:mode=0700 \
     --cap-drop ALL --security-opt no-new-privileges:true \
@@ -131,4 +137,12 @@ for purpose in app backup restore; do
   [[ "${user_info}" != *'"memberOf":'* ]]
 done
 
-echo "Amiary MinIO app, read-only backup, and manual-restore provisioning is repeatable."
+cp "${work_dir}/app.credentials" "${work_dir}/app.original"
+printf '%s\n%s\n' amiary-test-app wrong-password-must-not-reset-original-credential > "${work_dir}/app.credentials"
+if run_provisioning app >/dev/null 2>&1; then
+  echo "Existing credential was overwritten" >&2
+  exit 1
+fi
+mv "${work_dir}/app.original" "${work_dir}/app.credentials"
+run_provisioning app
+echo "PASS: repeatable scoped identities, read-only backup, drift rejection and credential retention."

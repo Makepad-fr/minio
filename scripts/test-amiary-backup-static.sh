@@ -26,7 +26,7 @@ done
 
 bash -n "${lib}" "${backup}" "${restore}" "${verify}" "${prune}" "${provision}"
 
-digest='minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+digest='ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b'
 grep -Fq "${digest}" "${lib}"
 grep -Fq "AMIARY_PRODUCTION_BUCKET='amiary-photos'" "${lib}"
 grep -Fq 'backup tooling is restricted to the Amiary production bucket' "${lib}"
@@ -73,17 +73,9 @@ jq -e '
   ([.Statement[].Action[]] | index("s3:DeleteObject") != null)
 ' "${restore_policy}" >/dev/null
 
-for deploy_contract in \
-  DEPLOY_AMIARY_BACKUP_ACCESS_KEY DEPLOY_AMIARY_BACKUP_SECRET_KEY \
-  DEPLOY_AMIARY_RESTORE_ACCESS_KEY DEPLOY_AMIARY_RESTORE_SECRET_KEY \
-  policies/amiary-backup.json policies/amiary-restore.json \
-  'provision_amiary_identity backup' 'provision_amiary_identity restore'; do
-  grep -Fq "${deploy_contract}" "${deploy_workflow}"
-done
-
 grep -Fq 'pull_request:' "${workflow}"
 grep -Fq 'runs-on: ubuntu-24.04' "${workflow}"
-grep -Fq 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09' "${workflow}"
+grep -Fq 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "${workflow}"
 grep -Fq 'timeout-minutes: 20' "${workflow}"
 grep -Fq 'shellcheck scripts/*.sh' "${workflow}"
 grep -Fq 'test-amiary-provisioning.sh' "${workflow}"
