@@ -1,82 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+set +x
 : "${MINIO_ICEBERG_ACCESS_KEY:?set MINIO_ICEBERG_ACCESS_KEY}"
 : "${MINIO_ICEBERG_SECRET_KEY:?set MINIO_ICEBERG_SECRET_KEY}"
-
+[[ ${MINIO_ICEBERG_ACCESS_KEY} == scraping-iceberg ]] || { echo 'Only the Fashion identity is supported' >&2; exit 1; }
+[[ ${#MINIO_ICEBERG_SECRET_KEY} -ge 32 ]] || { echo 'Fashion password must be at least 32 characters' >&2; exit 1; }
+[[ ${MINIO_ICEBERG_BUCKET:-fashion-iceberg} == fashion-iceberg && ${MINIO_ICEBERG_POLICY:-scraping-iceberg-writer} == scraping-iceberg-writer ]] || { echo 'Only the Fashion bucket and policy are supported' >&2; exit 1; }
 container_name=${MINIO_CONTAINER_NAME:-minio-minio-1}
-bucket=${MINIO_ICEBERG_BUCKET:-fashion-iceberg}
-policy_name=${MINIO_ICEBERG_POLICY:-scraping-iceberg-writer}
-mc_image=${MINIO_MC_IMAGE:-minio/mc:latest}
-
-if [[ ! "${bucket}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]; then
-  echo "Invalid MinIO bucket name: ${bucket}" >&2
-  exit 1
+# Use the existing server's client and credentials. Do not expose credentials in
+# host command arguments or start an unpinned privileged client on the host network.
+{
+  printf 'set +x\nexport MINIO_ICEBERG_SECRET_KEY=%q\n' "$MINIO_ICEBERG_SECRET_KEY"
+  cat <<'INNER'
+set -euo pipefail
+: "${MINIO_ROOT_USER:?}" "${MINIO_ROOT_PASSWORD:?}"
+config=$(mktemp -d)
+chmod 700 "$config"
+trap 'rm -rf -- "$config"' EXIT
+export MC_CONFIG_DIR="$config"
+mc alias set admin http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+# Listing must succeed before deciding whether a user exists. Never treat an
+# unavailable service as permission to reset a potentially existing credential.
+users=$(mc admin user list --json admin)
+if [[ ${users//[[:space:]]/} == *'"accessKey":"scraping-iceberg"'* ]]; then
+  info=$(mc admin user info --json admin scraping-iceberg)
+  [[ ${info//[[:space:]]/} == *'"policyName":"scraping-iceberg-writer"'* ]] || { echo 'Existing Fashion identity has unexpected policy scope' >&2; exit 1; }
+  mc alias set app http://127.0.0.1:9000 scraping-iceberg "$MINIO_ICEBERG_SECRET_KEY" >/dev/null
+  mc ls app/fashion-iceberg >/dev/null
+else
+  mc admin user add admin scraping-iceberg "$MINIO_ICEBERG_SECRET_KEY" >/dev/null
 fi
-
-if ! docker inspect "${container_name}" >/dev/null 2>&1; then
-  echo "MinIO container ${container_name} is not running." >&2
-  exit 1
-fi
-
-minio_env=$(docker inspect "${container_name}" --format '{{range .Config.Env}}{{println .}}{{end}}')
-minio_root_user=$(printf '%s\n' "${minio_env}" | sed -n 's/^MINIO_ROOT_USER=//p' | tail -n 1)
-minio_root_password=$(printf '%s\n' "${minio_env}" | sed -n 's/^MINIO_ROOT_PASSWORD=//p' | tail -n 1)
-: "${minio_root_user:?MINIO_ROOT_USER missing from ${container_name}}"
-: "${minio_root_password:?MINIO_ROOT_PASSWORD missing from ${container_name}}"
-
-policy_file=$(mktemp)
-cleanup_policy() {
-  if [[ -f "${policy_file}" ]]; then
-    unlink "${policy_file}"
-  fi
-}
-trap cleanup_policy EXIT
-chmod 600 "${policy_file}"
-
-printf '%s\n' "{
-  \"Version\": \"2012-10-17\",
-  \"Statement\": [
-    {
-      \"Effect\": \"Allow\",
-      \"Action\": [
-        \"s3:GetBucketLocation\",
-        \"s3:ListBucket\",
-        \"s3:ListBucketMultipartUploads\"
-      ],
-      \"Resource\": [\"arn:aws:s3:::${bucket}\"]
-    },
-    {
-      \"Effect\": \"Allow\",
-      \"Action\": [
-        \"s3:GetObject\",
-        \"s3:PutObject\",
-        \"s3:DeleteObject\",
-        \"s3:AbortMultipartUpload\",
-        \"s3:ListMultipartUploadParts\"
-      ],
-      \"Resource\": [\"arn:aws:s3:::${bucket}/*\"]
-    }
-  ]
-}" > "${policy_file}"
-
-docker run --rm --network host --entrypoint /bin/sh \
-  -e MINIO_ROOT_USER="${minio_root_user}" \
-  -e MINIO_ROOT_PASSWORD="${minio_root_password}" \
-  -e MINIO_ICEBERG_ACCESS_KEY \
-  -e MINIO_ICEBERG_SECRET_KEY \
-  -e MINIO_ICEBERG_BUCKET="${bucket}" \
-  -e MINIO_ICEBERG_POLICY="${policy_name}" \
-  -v "${policy_file}:/policy.json:ro" \
-  "${mc_image}" -c '
-    set -eu
-    mc alias set local http://127.0.0.1:9000 "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}" >/dev/null
-    mc mb --ignore-existing "local/${MINIO_ICEBERG_BUCKET}" >/dev/null
-    mc admin policy create local "${MINIO_ICEBERG_POLICY}" /policy.json >/dev/null
-    mc admin user add local "${MINIO_ICEBERG_ACCESS_KEY}" "${MINIO_ICEBERG_SECRET_KEY}" >/dev/null
-    mc admin policy attach local "${MINIO_ICEBERG_POLICY}" --user "${MINIO_ICEBERG_ACCESS_KEY}" >/dev/null
-    mc stat "local/${MINIO_ICEBERG_BUCKET}" >/dev/null
-    mc admin user info local "${MINIO_ICEBERG_ACCESS_KEY}" >/dev/null
-  '
-
-echo "Provisioned MinIO bucket ${bucket} and user ${MINIO_ICEBERG_ACCESS_KEY}."
+cat > "$config/policy.json" <<'POLICY'
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::fashion-iceberg"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::fashion-iceberg/*"]}]}
+POLICY
+mc mb --ignore-existing admin/fashion-iceberg >/dev/null
+mc anonymous set none admin/fashion-iceberg >/dev/null
+mc admin policy create admin scraping-iceberg-writer "$config/policy.json" >/dev/null
+mc admin policy attach admin scraping-iceberg-writer --user scraping-iceberg >/dev/null
+mc alias set app http://127.0.0.1:9000 scraping-iceberg "$MINIO_ICEBERG_SECRET_KEY" >/dev/null
+mc ls app/fashion-iceberg >/dev/null
+INNER
+} | docker exec -i "$container_name" bash -s
+printf '%s\n' 'Fashion private bucket and retained scoped credential verified.'
