@@ -148,3 +148,23 @@ bucket access, and verifies the application credential. The real-container test
 checks repeatability, scoped writes, cross-bucket/admin denial and retention of
 the original password after a mismatched-password attempt. No production
 provisioning is implied by passing this disposable test.
+
+## BetaCrew private object storage
+
+`scripts/provision-betacrew.sh` provisions only `betacrew-production` and its
+`betacrew-production-app` identity. Supply `MAKEPAD_BETACREW_PRODUCTION_PASSWORD`
+(at least 32 characters) through the protected execution environment. Existing
+credentials and unexpected policy assignments cause validation failure rather
+than credential rotation. The bucket remains private. The script uses the
+existing MinIO container and does not install host services or alter shared topology.
+
+`scripts/betacrew-encrypted-backup.py backup` exports only this bucket to the
+protected restic repository configured by the host administrator. Run it on
+`db-server-1` with the existing root-only backup environment. It records the exact
+snapshot ID and does not prune backups. `restore --snapshot ID` verifies the
+bucket tag, source path and checksums, then round-trips objects through a disposable
+network-isolated MinIO container. It never writes restored data into production.
+Production activation requires an encrypted backup and successful restore receipt;
+local provisioning tests alone do not satisfy that gate. No timer is installed by
+this change. Run `bash scripts/validate-betacrew-config.sh` for disposable provisioning
+and object-integrity tests.
