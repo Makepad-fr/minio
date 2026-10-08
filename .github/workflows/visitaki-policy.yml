@@ -1,5 +1,7 @@
 name: Visitaki storage isolation
 on:
+  push:
+    branches: [main]
   pull_request:
     paths: ['policies/visitaki-preview.json', 'scripts/*visitaki*', 'systemd/visitaki-*', '.github/workflows/visitaki-policy.yml']
 permissions:
