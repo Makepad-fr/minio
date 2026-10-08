@@ -1,0 +1,31 @@
+[Unit]
+Description=Amiary production MinIO encrypted-object snapshot backup
+Documentation=file:/opt/makepad/minio/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathIsMountPoint=/mnt/makepad-storagebox
+
+[Service]
+Type=oneshot
+User=makepad-minio-backup
+Group=makepad-minio-backup
+SupplementaryGroups=docker
+EnvironmentFile=/etc/makepad/amiary-minio-backup.env
+ExecStart=/opt/makepad/minio/scripts/backup-amiary-bucket.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/etc/makepad/secrets/minio/backup/amiary.credentials
+ReadWritePaths=/mnt/makepad-storagebox/amiary-minio
+TimeoutStartSec=5h
+
+[Install]
+WantedBy=multi-user.target
