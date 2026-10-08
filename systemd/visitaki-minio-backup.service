@@ -1,0 +1,15 @@
+[Unit]
+Description=Encrypted Visitaki object backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+ExecStart=/usr/bin/python3 /srv/makepad/visitaki-backups/visitaki-minio-backup.py backup
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

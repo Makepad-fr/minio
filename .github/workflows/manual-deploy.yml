@@ -2,77 +2,214 @@ name: Manual Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment target
+        required: true
+        type: choice
+        options:
+          - canary
+          - production
 
 jobs:
   deploy:
+    if: github.repository == 'Makepad-fr/minio' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.environment }}
     permissions:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
 
       - name: Configure SSH key
         shell: bash
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.ssh"
           chmod 700 "${HOME}/.ssh"
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY:?missing SSH private key}" > "${HOME}/.ssh/id_ed25519"
           chmod 600 "${HOME}/.ssh/id_ed25519"
 
-      - name: Upload deployment bundle
+      - name: Prepare deployment bundle
+        shell: bash
+        env:
+          DEPLOY_CATWLK_OBJECTS_NETWORK: ${{ secrets.DEPLOY_CATWLK_OBJECTS_NETWORK }}
+          DEPLOY_MINIO_ROOT_PASSWORD: ${{ secrets.DEPLOY_MINIO_ROOT_PASSWORD }}
+          DEPLOY_VIF_OBJECTS_NETWORK: ${{ secrets.DEPLOY_VIF_OBJECTS_NETWORK }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_CATWLK_OBJECTS_NETWORK:?set DEPLOY_CATWLK_OBJECTS_NETWORK environment secret}"
+          : "${DEPLOY_MINIO_ROOT_PASSWORD:?set DEPLOY_MINIO_ROOT_PASSWORD environment secret}"
+          deploy_env="${{ inputs.environment }}"
+          bundle_root="${RUNNER_TEMP}/bundle"
+          mkdir -p "${bundle_root}/envs/${deploy_env}"
+          cp compose.yml "${bundle_root}/compose.yml"
+          cp "envs/${deploy_env}/compose.yml" "${bundle_root}/envs/${deploy_env}/compose.yml"
+          cp "envs/${deploy_env}/.env.minio" "${bundle_root}/envs/${deploy_env}/.env.minio"
+          env_minio="${bundle_root}/envs/${deploy_env}/.env.minio"
+          env_minio_tmp=$(mktemp "${env_minio}.XXXXXX")
+          trap 'rm -f "${env_minio_tmp}"' EXIT
+          password_written=false
+          while IFS= read -r line || [[ -n "${line}" ]]; do
+            if [[ "${line}" == "MINIO_ROOT_PASSWORD="* ]]; then
+              printf 'MINIO_ROOT_PASSWORD=%s\n' "${DEPLOY_MINIO_ROOT_PASSWORD}" >> "${env_minio_tmp}"
+              password_written=true
+            else
+              printf '%s\n' "${line}" >> "${env_minio_tmp}"
+            fi
+          done < "${env_minio}"
+          if [[ "${password_written}" != "true" ]]; then
+            printf 'MINIO_ROOT_PASSWORD=%s\n' "${DEPLOY_MINIO_ROOT_PASSWORD}" >> "${env_minio_tmp}"
+          fi
+          mv "${env_minio_tmp}" "${env_minio}"
+          trap - EXIT
+          env_deploy="${bundle_root}/envs/${deploy_env}/.env.deploy"
+          printf 'MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=%s\n' "${DEPLOY_CATWLK_OBJECTS_NETWORK}" > "${env_deploy}"
+          if [[ "${deploy_env}" == "production" ]]; then
+            : "${DEPLOY_VIF_OBJECTS_NETWORK:?set DEPLOY_VIF_OBJECTS_NETWORK production environment secret}"
+            printf 'MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=%s\n' "${DEPLOY_VIF_OBJECTS_NETWORK}" >> "${env_deploy}"
+          fi
+          chmod 600 "${env_minio}" "${env_deploy}"
+
+      - name: Deploy via Docker Swarm
         shell: bash
         env:
           REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
           REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+          STACK_NAME: ${{ secrets.DEPLOY_STACK_NAME }}
         run: |
           set -euo pipefail
-          remote_port=${REMOTE_PORT:-22}
-          ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
-          scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
-          remote_target="${REMOTE_USER}@${REMOTE_HOST}"
-          staging_dir="/tmp/makepad-minio-${GITHUB_RUN_ID}"
-
-          ssh "${ssh_opts[@]}" "${remote_target}" install -d -m 0700 "${staging_dir}" "${staging_dir}/envs/production" "${staging_dir}/scripts" "${staging_dir}/systemd"
-          scp "${scp_opts[@]}" compose.yml "${remote_target}:${staging_dir}/compose.yml"
-          scp "${scp_opts[@]}" envs/production/.env.minio "${remote_target}:${staging_dir}/envs/production/.env.minio"
-          scp "${scp_opts[@]}" scripts/provision-catwlk.sh "${remote_target}:${staging_dir}/scripts/provision-catwlk.sh"
-          scp "${scp_opts[@]}" scripts/provision-betacrew.sh "${remote_target}:${staging_dir}/scripts/provision-betacrew.sh"
-          scp "${scp_opts[@]}" scripts/backup-minio.sh "${remote_target}:${staging_dir}/scripts/backup-minio.sh"
-          scp "${scp_opts[@]}" scripts/verify-betacrew-restore.sh "${remote_target}:${staging_dir}/scripts/verify-betacrew-restore.sh"
-          scp "${scp_opts[@]}" scripts/install-host.sh "${remote_target}:${staging_dir}/scripts/install-host.sh"
-          scp "${scp_opts[@]}" systemd/makepad-minio.service "${remote_target}:${staging_dir}/systemd/makepad-minio.service"
-          scp "${scp_opts[@]}" systemd/makepad-minio-backup.service "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.service"
-          scp "${scp_opts[@]}" systemd/makepad-minio-backup.timer "${remote_target}:${staging_dir}/systemd/makepad-minio-backup.timer"
-          echo "MINIO_STAGING_DIR=${staging_dir}" >> "${GITHUB_ENV}"
-
-      - name: Enable MinIO service and backup timer
-        shell: bash
-        env:
-          REMOTE_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
-          REMOTE_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          REMOTE_USER: ${{ secrets.DEPLOY_SSH_USER }}
-          REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
-          BETACREW_PRODUCTION_PASSWORD: ${{ secrets.MAKEPAD_BETACREW_PRODUCTION_PASSWORD }}
-        run: |
-          set -euo pipefail
-          : "${BETACREW_PRODUCTION_PASSWORD:?set MAKEPAD_BETACREW_PRODUCTION_PASSWORD}"
+          : "${REMOTE_HOST:?}" "${REMOTE_USER:?}" "${REMOTE_DIR:?}" "${STACK_NAME:?}"
+          if [[ "${REMOTE_USER}" == "root" ]]; then
+            echo "DEPLOY_SSH_USER must not be root." >&2
+            exit 1
+          fi
+          bundle_root="${RUNNER_TEMP}/bundle"
           remote_port=${REMOTE_PORT:-22}
           ssh_opts=(-o StrictHostKeyChecking=accept-new -p "${remote_port}")
           scp_opts=(-o StrictHostKeyChecking=accept-new -P "${remote_port}")
           remote_target="${REMOTE_USER}@${REMOTE_HOST}"
 
-          secret_file=$(mktemp)
-          chmod 600 "${secret_file}"
-          printf '%s\n' "${BETACREW_PRODUCTION_PASSWORD}" > "${secret_file}"
-          ssh "${ssh_opts[@]}" "${remote_target}" 'umask 077; : > /tmp/betacrew-minio-password'
-          scp "${scp_opts[@]}" "${secret_file}" "${remote_target}:/tmp/betacrew-minio-password"
-          find "${secret_file}" -delete
+          ssh "${ssh_opts[@]}" "${remote_target}" mkdir -p "${REMOTE_DIR}/envs/${{ inputs.environment }}"
+          scp "${scp_opts[@]}" "${bundle_root}/compose.yml" "${remote_target}:${REMOTE_DIR}/compose.yml"
+          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/compose.yml" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/compose.yml"
+          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.minio" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.minio"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 "${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.minio"
+          scp "${scp_opts[@]}" "${bundle_root}/envs/${{ inputs.environment }}/.env.deploy" "${remote_target}:${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
+          # shellcheck disable=SC2029
+          ssh "${ssh_opts[@]}" "${remote_target}" chmod 600 "${REMOTE_DIR}/envs/${{ inputs.environment }}/.env.deploy"
 
-          ssh "${ssh_opts[@]}" "${remote_target}" \
-            bash "${MINIO_STAGING_DIR}/scripts/install-host.sh" \
-              "${REMOTE_DIR}" "${MINIO_STAGING_DIR}" /tmp/betacrew-minio-password
+          ssh "${ssh_opts[@]}" "${remote_target}" bash -se -- "${REMOTE_DIR}" "${STACK_NAME}" "${{ inputs.environment }}" <<'EOF'
+          set -euo pipefail
+          remote_dir=$1
+          stack_name=$2
+          deploy_env=$3
+          env_minio="${remote_dir}/envs/${deploy_env}/.env.minio"
+          env_deploy="${remote_dir}/envs/${deploy_env}/.env.deploy"
+          env_value() {
+            local key=$1
+            local file=$2
+            awk -v key="${key}" '
+              index($0, key "=") == 1 {
+                value = substr($0, length(key) + 2)
+                found = 1
+              }
+              END {
+                if (found) {
+                  printf "%s", value
+                }
+              }
+            ' "${file}"
+          }
+          require_value() {
+            local key=$1
+            local value=$2
+            if [[ -z "${value}" ]]; then
+              echo "Missing required deploy value: ${key}" >&2
+              exit 1
+            fi
+          }
+
+          objects_network=$(env_value MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK "${env_deploy}")
+          vif_objects_network=$(env_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${env_deploy}")
+          catwlk_bucket=$(env_value MAKEPAD_MINIO_CATWLK_BUCKET "${env_minio}")
+          vif_bucket=$(env_value MAKEPAD_MINIO_VIF_BUCKET "${env_minio}")
+          minio_root_user=$(env_value MINIO_ROOT_USER "${env_minio}")
+          minio_root_password=$(env_value MINIO_ROOT_PASSWORD "${env_minio}")
+
+          require_value MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK "${objects_network}"
+          require_value MAKEPAD_MINIO_CATWLK_BUCKET "${catwlk_bucket}"
+          require_value MINIO_ROOT_USER "${minio_root_user}"
+          require_value MINIO_ROOT_PASSWORD "${minio_root_password}"
+
+          vif_enabled=false
+          if [[ "${deploy_env}" == "production" || -n "${vif_objects_network}" || -n "${vif_bucket}" ]]; then
+            vif_enabled=true
+            require_value MAKEPAD_MINIO_VIF_OBJECTS_NETWORK "${vif_objects_network}"
+            require_value MAKEPAD_MINIO_VIF_BUCKET "${vif_bucket}"
+          fi
+
+          docker network inspect "${objects_network}" >/dev/null 2>&1 \
+            || docker network create --driver overlay --attachable "${objects_network}"
+          if [[ "${vif_enabled}" == "true" ]]; then
+            docker network inspect "${vif_objects_network}" >/dev/null 2>&1 \
+              || docker network create --driver overlay --attachable "${vif_objects_network}"
+          fi
+
+          compose_env=("MAKEPAD_MINIO_CATWLK_OBJECTS_NETWORK=${objects_network}")
+          if [[ "${vif_enabled}" == "true" ]]; then
+            compose_env+=("MAKEPAD_MINIO_VIF_OBJECTS_NETWORK=${vif_objects_network}")
+          fi
+
+          umask 077
+          stack_tmp=$(mktemp "${remote_dir}/stack.yml.XXXXXX")
+          trap 'rm -f "${stack_tmp}"' EXIT
+          env "${compose_env[@]}" docker compose \
+            --env-file "${env_minio}" \
+            --env-file "${env_deploy}" \
+            -f "${remote_dir}/compose.yml" \
+            -f "${remote_dir}/envs/${deploy_env}/compose.yml" \
+            config > "${stack_tmp}"
+          chmod 600 "${stack_tmp}"
+          mv "${stack_tmp}" "${remote_dir}/stack.yml"
+          chmod 600 "${remote_dir}/stack.yml"
+          trap - EXIT
+
+          docker stack deploy --compose-file "${remote_dir}/stack.yml" "${stack_name}"
+
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network "${objects_network}" minio/mc:latest \
+              alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          docker run --rm --network "${objects_network}" minio/mc:latest \
+            alias set local http://makepad-minio:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
+          docker run --rm --network "${objects_network}" minio/mc:latest \
+            mb --ignore-existing "local/${catwlk_bucket}" >/dev/null
+          if [[ "${vif_enabled}" == "true" ]]; then
+            for attempt in $(seq 1 30); do
+              if docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+                alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+
+            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+              alias set local http://makepad-minio-vif:9000 "${minio_root_user}" "${minio_root_password}" >/dev/null
+            docker run --rm --network "${vif_objects_network}" minio/mc:latest \
+              mb --ignore-existing "local/${vif_bucket}" >/dev/null
+          fi
+          EOF
