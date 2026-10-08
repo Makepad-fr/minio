@@ -19,7 +19,7 @@ The shared MinIO service joins app-specific external overlay networks:
 - Catwlk canary and production: `${DEPLOY_CATWLK_OBJECTS_NETWORK}` with service alias `makepad-minio`
 - VIF production only: `${DEPLOY_VIF_OBJECTS_NETWORK}` with service alias `makepad-minio-vif`
 
-Application stacks attach to their matching network and connect to the stable service alias for that application. VIF is intentionally production-only in this repository; canary deploys do not create or attach the VIF network. Amiary is deliberately not attached to an overlay here: its cross-host data plane must use a separately provisioned private, certificate-verified TLS endpoint. Until that endpoint, CA, and least-privilege credentials are wired into the Amiary stack, photo and export storage remains fail-closed.
+Application stacks attach to their matching network and connect to the stable service alias for that application. VIF is intentionally production-only in this repository; canary deploys do not create or attach the VIF network.
 
 ## Buckets
 
@@ -31,18 +31,6 @@ Use one bucket per application. For Catwlk:
 For VIF:
 
 - production: `${MAKEPAD_MINIO_VIF_BUCKET}`
-
-For Amiary:
-
-- canary: `amiary-photos-canary`
-- production: `amiary-photos`
-
-Both Amiary buckets have object versioning enabled. Each environment has three
-dedicated identities restricted to its own bucket: the application identity
-uses `policies/amiary-app.json`, the scheduled backup identity uses the
-List/Get-only `policies/amiary-backup.json`, and the manual restore identity
-uses `policies/amiary-restore.json`. The application and backup service never
-receive MinIO root or restore credentials.
 
 Applications should use their own bucket instead of sharing a global one.
 
@@ -66,17 +54,10 @@ Required environment secrets:
 - `DEPLOY_SSH_PORT`
 - `DEPLOY_SSH_USER`
 - `DEPLOY_SSH_PRIVATE_KEY`
-- `DEPLOY_SSH_KNOWN_HOSTS`
 - `DEPLOY_REMOTE_DIR`
 - `DEPLOY_STACK_NAME`
 - `DEPLOY_CATWLK_OBJECTS_NETWORK`
 - `DEPLOY_MINIO_ROOT_PASSWORD`
-- `DEPLOY_AMIARY_ACCESS_KEY`
-- `DEPLOY_AMIARY_SECRET_KEY` (at least 32 random characters)
-- `DEPLOY_AMIARY_BACKUP_ACCESS_KEY`
-- `DEPLOY_AMIARY_BACKUP_SECRET_KEY` (at least 32 random characters)
-- `DEPLOY_AMIARY_RESTORE_ACCESS_KEY`
-- `DEPLOY_AMIARY_RESTORE_SECRET_KEY` (at least 32 random characters)
 
 Required production-only environment secret:
 
@@ -84,28 +65,123 @@ Required production-only environment secret:
 
 The tracked `envs/<environment>/.env.minio` files intentionally leave `MINIO_ROOT_PASSWORD` empty. During deployment, the workflow copies the selected env file into a temporary bundle and injects `DEPLOY_MINIO_ROOT_PASSWORD` into that bundle before uploading it to the target host. If the secret is absent, the workflow fails before writing or uploading an empty password.
 
-The workflow deploys only the MinIO stack. If a required existing application network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated. Production deploys additionally create the VIF network when needed and ensure the VIF bucket exists. Amiary bucket and credential provisioning runs as a short-lived operator-side client on the existing MinIO management network; it does not expose MinIO to the Amiary application.
+The workflow deploys only the MinIO stack. If a required objects network does not exist yet, it is created on the manager before deployment. It also ensures the Catwlk bucket exists after the service is updated. Production deploys additionally create the VIF network when needed and ensure the VIF bucket exists.
 
-All three access keys and all three secret keys must be distinct. The MinIO server and administration
-client images are pinned by digest. Amiary provisioning is repeatable and
-verifies exact policy convergence, no administrative access, read-only backup
-behavior, and separate restore write/delete behavior:
+## Makepad Scan
 
-```bash
-scripts/test-amiary-provisioning.sh
-```
+Scanner assets use private bucket makepad-scan on the existing storage VM. Apply policies/makepad-scan.json to a dedicated service user. Public bucket access is forbidden. The existing host deployment is accessed over the private WireGuard path; do not introduce another MinIO instance.
 
-Credential rotation is coordinated: update the matching GitHub environment
-secret pair, deploy the reconciled identity, atomically replace the host's
-backup credential file when rotating that identity, and immediately run and
-verify a backup. The restore credential remains in the approved secret manager
-and is retrieved only for a restore drill or incident. Never reuse an app,
-backup, or restore key across environments.
+Provision the scanner on the existing host with `scripts/provision-makepad-scan.sh`.
+Supply the existing root credentials and a dedicated `SCAN_STORAGE_PASSWORD`
+through protected environment files. The script creates only `makepad-scan` and
+`makepad-scan-app`, disables anonymous access and attaches the scoped policy.
+It never resets an existing user's password. Keep the password in the Makepad
+vault; the application consumes it as a Swarm secret.
+
+`MinIO scanner contracts` runs on the owning repository’s existing Ubuntu runner policy. The
+policy stage validates the bucket boundary; the provisioning stage additionally
+starts a disposable pinned MinIO container and verifies repeatability, protected
+access and credential retention. It does not touch hosted buckets. Replacing the
+stale Amiary check requirement with this check needs an explicit repository-owner
+decision; this PR does not modify branch protection.
+
+## Visitaki restricted preview
+
+`policies/visitaki-preview.json` scopes the `visitaki-preview-app` identity to
+one private bucket, `visitaki-preview`. Production campaign inventory must use
+separate storage when the public launch gate is met. No anonymous object access
+is enabled; the application serves only reviewed public campaign images.
+
+On the storage host, run `scripts/provision-visitaki-preview.sh` with
+`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, and a vault-managed
+`VISITAKI_STORAGE_PASSWORD` (at least 32 characters). The script uses a temporary
+private mc configuration, does not rotate an existing user's password, and
+verifies authentication with the supplied application credential. If that check
+fails, stop and reconcile the vault; do not reset another user's credentials.
+
+The live storage host currently uses standalone host-network containers. This
+additive provisioning script does not redeploy the shared stack. Restrict
+Visitaki access to the existing private application-to-database path; do not
+open the S3 port publicly or change neighboring application policies.
+
+Run `scripts/test-visitaki-policy.sh` against an available Docker context to
+verify upload/read/delete and denial of unrelated-bucket and admin access. It
+uses a pinned MinIO image, synthetic credentials, no network, and no host ports.
+The Visitaki storage isolation PR check runs on a GitHub-hosted Linux runner;
+this public repository does not receive shared infrastructure-runner access.
+# Visitaki object backup
+
+On `db-server-1`, `scripts/visitaki-encrypted-backup.py backup` reads only the
+`visitaki-preview` bucket and writes an encrypted snapshot to the existing MinIO
+Restic repository. Credentials remain inside the existing MinIO container and
+the root-owned Restic environment file. Temporary plaintext objects are removed
+after the attempt; repository snapshots and shared retention are unchanged.
+
+The pilot normalizes uploaded campaign images to JPEG, with their MIME type and
+object references in PostgreSQL. This backup preserves current object keys and
+bytes. Database references require the separate Visitaki PostgreSQL backup;
+storage users and bucket policies are provisioned from reviewed configuration.
+
+Run `restore --snapshot <id>` to retrieve the encrypted snapshot, verify its
+manifest, restore it to an isolated MinIO container with no network or published
+ports, and compare every object after a second download. Use a synthetic private
+test object to prove a nonempty restore during initial activation. Only after
+that succeeds, install the script as
+`/srv/makepad/visitaki-backups/visitaki-minio-backup.py` and enable the two
+`systemd/visitaki-minio-backup.*` units. Root-owned receipts are stored under
+`/var/lib/makepad/visitaki-minio-backup`.
+
+## Fashion private storage
+
+The Fashion Iceberg provisioner operates only on the existing standalone MinIO
+container; it does not recreate shared storage or attach Swarm networks. Supply
+`MINIO_ICEBERG_ACCESS_KEY=scraping-iceberg` and a protected
+`MINIO_ICEBERG_SECRET_KEY` of at least32 characters, then run
+`bash scripts/provision-fashion-iceberg.sh` with the established Docker context.
+The optional `MINIO_CONTAINER_NAME` selects the existing server. The bucket and
+policy remain fixed to `fashion-iceberg` and `scraping-iceberg-writer`.
+
+The script uses the server's installed client and existing root environment,
+passes the application password through stdin, and removes its private client
+configuration afterward. It never resets an existing password, disables anonymous
+bucket access, and verifies the application credential. The real-container test
+checks repeatability, scoped writes, cross-bucket/admin denial and retention of
+the original password after a mismatched-password attempt. No production
+provisioning is implied by passing this disposable test.
+
+## BetaCrew private object storage
+
+`scripts/provision-betacrew.sh` provisions only `betacrew-production` and its
+`betacrew-production-app` identity. Supply `MAKEPAD_BETACREW_PRODUCTION_PASSWORD`
+(at least 32 characters) through the protected execution environment. Existing
+credentials and unexpected policy assignments cause validation failure rather
+than credential rotation. The bucket remains private. The script uses the
+existing MinIO container and does not install host services or alter shared topology.
+
+`scripts/betacrew-encrypted-backup.py backup` exports only this bucket to the
+protected restic repository configured by the host administrator. Run it on
+`db-server-1` with the existing root-only backup environment. It records the exact
+snapshot ID and does not prune backups. `restore --snapshot ID` verifies the
+bucket tag, source path and checksums, then round-trips objects through a disposable
+network-isolated MinIO container. It never writes restored data into production.
+Production activation requires an encrypted backup and successful restore receipt;
+local provisioning tests alone do not satisfy that gate. No timer is installed by
+this change. Run `bash scripts/validate-betacrew-config.sh` for disposable provisioning
+and object-integrity tests.
+
+## Amiary scoped provisioning
+
+Provision Amiary separately with `scripts/provision-amiary.sh`, using the existing
+management network and distinct application, backup and restore credential files.
+This PR does not connect its application data plane, change shared MinIO resource
+limits or require Amiary secrets for unrelated deployments. Existing credentials
+and unexpected direct/group policy assignments are rejected without rotation.
+Credential rotation needs a separate coordinated operation.
 
 ## Amiary Production Backup And Restore
 
 Only the production `amiary-photos` bucket is accepted by the backup and
-restore entrypoints. The scripts use the pinned `minio/mc` digest already used
+restore entrypoints. The scripts use the pinned internal MinIO client fixture already used
 for Amiary provisioning. Backup and restore each have a separate two-line
 credential-file contract: line one is the access key and line two is the secret
 key. Scheduled backup loads only the List/Get identity. The write/delete restore
@@ -263,3 +339,5 @@ scripts/test-amiary-backup-disposable.sh
 `Amiary provisioning and backup contracts` job can be required by branch
 protection. Pushes to `main` are path-filtered. The workflow uses only local
 lint and disposable containers and contains no deployment or remote-host step.
+
+The pinned client fixture requires GHCR read access on the operator host. The original Docker Hub digests are unavailable; live provisioning remains gated on verified host access and topology.

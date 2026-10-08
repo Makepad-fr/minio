@@ -17,7 +17,7 @@ restored_files="${work_dir}/restored"
 storage_mount="${work_dir}/storagebox"
 backup_root="${storage_mount}/amiary-minio"
 restore_work="${work_dir}/restore-work"
-mc_image='minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+mc_image='ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b'
 test_uid=$(id -u)
 test_gid=$(id -g)
 test_phase=initialization
@@ -60,7 +60,7 @@ docker run -d --rm --name "${container}" --network "${network}" \
   --network-alias makepad-minio-amiary \
   -e MINIO_ROOT_USER=test-root-user \
   -e MINIO_ROOT_PASSWORD=test-root-password-at-least-32-chars \
-  minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e \
+  ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b \
   server /data >/dev/null
 
 test_phase='identity provisioning'
@@ -74,7 +74,7 @@ provision_identity() {
   AMIARY_MINIO_ADMIN_PASSWORD=test-root-password-at-least-32-chars \
   AMIARY_MINIO_CREDENTIALS_FILE="${credentials}" \
   AMIARY_MINIO_POLICY_TEMPLATE="${repo_root}/policies/amiary-${purpose}.json" \
-    "${script_dir}/provision-amiary.sh" >/dev/null 2>&1
+    "${script_dir}/provision-amiary.sh"
 }
 provision_identity app "${app_credentials}"
 provision_identity backup "${backup_credentials}"
