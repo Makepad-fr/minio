@@ -4,13 +4,26 @@ on:
     paths: ['policies/visitaki-preview.json', 'scripts/*visitaki*', 'systemd/visitaki-*', '.github/workflows/visitaki-policy.yml']
 permissions:
   contents: read
+  packages: read
 jobs:
   policy:
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Pull pinned private MinIO fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry=$(mktemp -d "$RUNNER_TEMP/minio-registry.XXXXXX")
+          trap 'rm -rf -- "$registry"' EXIT
+          printf '%s' "$GH_TOKEN" | docker --config "$registry" login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
+          docker --config "$registry" pull ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b
       - run: scripts/test-visitaki-policy.sh
       - run: python3 scripts/test-visitaki-backup.py

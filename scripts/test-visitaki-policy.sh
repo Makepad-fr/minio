@@ -6,7 +6,7 @@ trap 'docker rm -fv "$name" >/dev/null 2>&1 || true' EXIT
 # No published ports, host volumes, or production credentials.
 docker create --name "$name" --network none --cpus 0.5 --memory 384m \
  -e MINIO_ROOT_USER=integration-admin -e MINIO_ROOT_PASSWORD=disposable-storage-admin \
- quay.io/minio/minio@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0 server /data >/dev/null
+ ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b server /data >/dev/null
 docker cp "$root/policies/visitaki-preview.json" "$name:/tmp/policy.json"
 docker start "$name" >/dev/null
 docker exec "$name" sh -eu -c '
