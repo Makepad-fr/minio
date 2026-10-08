@@ -130,3 +130,21 @@ that succeeds, install the script as
 `/srv/makepad/visitaki-backups/visitaki-minio-backup.py` and enable the two
 `systemd/visitaki-minio-backup.*` units. Root-owned receipts are stored under
 `/var/lib/makepad/visitaki-minio-backup`.
+
+## Fashion private storage
+
+The Fashion Iceberg provisioner operates only on the existing standalone MinIO
+container; it does not recreate shared storage or attach Swarm networks. Supply
+`MINIO_ICEBERG_ACCESS_KEY=scraping-iceberg` and a protected
+`MINIO_ICEBERG_SECRET_KEY` of at least32 characters, then run
+`bash scripts/provision-fashion-iceberg.sh` with the established Docker context.
+The optional `MINIO_CONTAINER_NAME` selects the existing server. The bucket and
+policy remain fixed to `fashion-iceberg` and `scraping-iceberg-writer`.
+
+The script uses the server's installed client and existing root environment,
+passes the application password through stdin, and removes its private client
+configuration afterward. It never resets an existing password, disables anonymous
+bucket access, and verifies the application credential. The real-container test
+checks repeatability, scoped writes, cross-bucket/admin denial and retention of
+the original password after a mismatched-password attempt. No production
+provisioning is implied by passing this disposable test.
