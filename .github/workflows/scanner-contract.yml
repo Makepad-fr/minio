@@ -1,0 +1,59 @@
+name: MinIO scanner contract
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  scanner-contract:
+    name: MinIO scanner contracts
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Pull pinned private MinIO fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry=$(mktemp -d "$RUNNER_TEMP/minio-registry.XXXXXX")
+          trap 'rm -rf -- "$registry"' EXIT
+          printf '%s' "$GH_TOKEN" | docker --config "$registry" login ghcr.io -u "$GH_ACTOR" --password-stdin >/dev/null
+          docker --config "$registry" pull ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b
+      - name: Check private bucket policy scope
+        run: |
+          python3 - <<'PY'
+          import json
+          policy=json.load(open('policies/makepad-scan.json'))
+          assert policy['Version']=='2012-10-17'
+          for statement in policy['Statement']:
+              assert statement['Effect']=='Allow'
+              assert set(statement['Resource']) <= {'arn:aws:s3:::makepad-scan','arn:aws:s3:::makepad-scan/*'}
+              assert '*' not in statement['Action']
+              assert all(a.startswith('s3:') and '*' not in a for a in statement['Action'])
+          PY
+      - name: Test provisioning when introduced by this stack
+        run: |
+          if [ -f scripts/test-scan-provisioning.sh ]; then
+            bash -n scripts/provision-makepad-scan.sh scripts/test-scan-provisioning.sh
+            scripts/test-scan-provisioning.sh
+          fi
+      - name: Verify isolated Fashion provisioning
+        run: |
+          bash -n scripts/provision-fashion-iceberg.sh scripts/test-fashion-provisioning.sh
+          bash scripts/test-fashion-provisioning.sh
+      - name: Verify isolated BetaCrew provisioning and object integrity
+        run: bash scripts/validate-betacrew-config.sh
+      - name: Install encrypted backup test dependency
+        run: sudo apt-get update && sudo apt-get install -y restic
+      - name: Verify encrypted BetaCrew snapshot and isolated restore
+        run: python3 scripts/test-betacrew-restore.py
