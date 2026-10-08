@@ -5,7 +5,7 @@ container="makepad-scan-minio-test-${GITHUB_RUN_ID:-local}-$$"
 trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 image=ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b
 docker run -d --network none --name "$container" --memory 1g --cpus 2 --tmpfs /data:size=268435456 -e MINIO_ROOT_USER=scan-test-root -e MINIO_ROOT_PASSWORD=scan-disposable-root-password -v "$root/scripts:/source/scripts:ro" -v "$root/policies:/source/policies:ro" "$image" server /data >/dev/null
-for i in {1..30}; do
+for _ in {1..30}; do
   if docker exec "$container" mc alias set ci-admin http://127.0.0.1:9000 scan-test-root scan-disposable-root-password >/dev/null 2>&1; then break; fi
   sleep 1
 done
