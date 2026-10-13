@@ -25,6 +25,7 @@ users=$(mc admin user list --json admin)
 if [[ ${users//[[:space:]]/} == *'"accessKey":"scraping-iceberg"'* ]]; then
   info=$(mc admin user info --json admin scraping-iceberg)
   [[ ${info//[[:space:]]/} == *'"policyName":"scraping-iceberg-writer"'* ]] || { echo 'Existing Fashion identity has unexpected policy scope' >&2; exit 1; }
+  [[ $info != *'"memberOf"'* || ${info//[[:space:]]/} == *'"memberOf":[]'* || ${info//[[:space:]]/} == *'"memberOf":null'* ]] || { echo 'Existing Fashion identity has unexpected group membership' >&2; exit 1; }
   mc alias set app http://127.0.0.1:9000 scraping-iceberg "$MINIO_ICEBERG_SECRET_KEY" >/dev/null
   mc ls app/fashion-iceberg >/dev/null
 else
