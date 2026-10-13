@@ -22,6 +22,10 @@ docker exec "$container" mc anonymous get admin/betacrew-production | grep -q pr
 if MAKEPAD_BETACREW_PRODUCTION_PASSWORD=wrong-password-must-never-replace-existing bash "$root/scripts/provision-betacrew.sh" >/dev/null 2>&1; then echo 'Replaced existing password' >&2; exit 1; fi
 [[ $(docker exec "$container" mc cat app/betacrew-production/probe) == private-betacrew ]]
 if MAKEPAD_BETACREW_PRODUCTION_USER=unrelated bash "$root/scripts/provision-betacrew.sh" >/dev/null 2>&1; then exit 1; fi
+docker exec "$container" mc admin group add admin unexpected-group betacrew-production-app >/dev/null
+docker exec "$container" mc admin policy attach admin readwrite --group unexpected-group >/dev/null
+if bash "$root/scripts/provision-betacrew.sh" >/dev/null 2>&1; then echo 'Accepted unexpected group privileges' >&2; exit 1; fi
+docker exec "$container" mc admin group remove admin unexpected-group betacrew-production-app >/dev/null
 docker exec "$container" mc admin policy attach admin readwrite --user betacrew-production-app >/dev/null
 if bash "$root/scripts/provision-betacrew.sh" >/dev/null 2>&1; then echo 'Accepted unexpected existing policy scope' >&2; exit 1; fi
 printf '%s\n' 'PASS: repeated provisioning, private read/write, cross-bucket/admin denial and credential retention.'
