@@ -18,7 +18,7 @@ ROOT = Path('/var/lib/makepad/betacrew-minio-backup')
 ENV = Path('/etc/makepad/backups/restic-minio.env')
 SOURCE = 'minio-minio-1'
 BUCKET = 'betacrew-production'
-IMAGE = 'quay.io/minio/minio@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0'
+IMAGE = 'ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b'
 
 
 def run(args, **kwargs):

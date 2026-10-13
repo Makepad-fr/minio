@@ -25,6 +25,7 @@ users=$(mc admin user list --json admin)
 if [[ ${users//[[:space:]]/} == *'"accessKey":"betacrew-production-app"'* ]]; then
   info=$(mc admin user info --json admin betacrew-production-app)
   [[ ${info//[[:space:]]/} == *'"policyName":"betacrew-production"'* ]] || { echo 'Existing BetaCrew identity has unexpected policy scope' >&2; exit 1; }
+  [[ $info != *'"memberOf"'* || ${info//[[:space:]]/} == *'"memberOf":[]'* || ${info//[[:space:]]/} == *'"memberOf":null'* ]] || { echo 'Existing BetaCrew identity has unexpected group membership' >&2; exit 1; }
   mc alias set app http://127.0.0.1:9000 betacrew-production-app "$MAKEPAD_BETACREW_PRODUCTION_PASSWORD" >/dev/null
   mc ls app/betacrew-production >/dev/null
 else
