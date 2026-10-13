@@ -15,7 +15,7 @@ spec.loader.exec_module(m)
 restic_bin = os.environ.get('RESTIC_BIN') or shutil.which('restic')
 assert restic_bin, 'Install restic to run the encrypted restore integration test'
 container = 'betacrew-backup-test-' + uuid.uuid4().hex[:12]
-image = 'ghcr.io/makepad-fr/visitaki-test-minio@sha256:f6efb212cad3b62f78ca02339f16d8bc28d5bb2fbe792dfc21225c6037d2af8b'
+image = m.IMAGE
 
 def cmd(*args, **kwargs):
     return subprocess.run(args, check=True, capture_output=True, **kwargs).stdout
@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix='betacrew-restic-test-') as tmp:
     restic('init')
     m.ROOT = root / 'backups'
     m.ROOT.mkdir(mode=0o700)
-    m.SOURCE, m.IMAGE, m.restic = container, image, restic
+    m.SOURCE, m.restic = container, restic
     try:
         cmd('docker', 'run', '-d', '--network', 'none', '--name', container, '--tmpfs', '/data:size=268435456', '-e', 'MINIO_ROOT_USER=fixture-admin', '-e', 'MINIO_ROOT_PASSWORD=disposable-admin-password', image, 'server', '/data')
         for _ in range(30):
