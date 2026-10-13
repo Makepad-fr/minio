@@ -257,7 +257,8 @@ write_snapshot_manifests() {
 verify_snapshot() {
   local snapshot=$1 snapshot_id expected_control actual_control
   local record digest separator relative object_path actual_digest record_count=0 record_bytes=0
-  local actual_count=0 actual_bytes=0 path manifest_count manifest_bytes inventory_count
+  local actual_count=0 actual_bytes=0 path manifest_count manifest_bytes inventory_count seen_path
+  local -a seen_paths=()
 
   [[ -d "${snapshot}" && ! -L "${snapshot}" ]] || die "snapshot directory is missing or invalid"
   snapshot_id=${snapshot##*/}
@@ -293,6 +294,10 @@ verify_snapshot() {
     [[ "${digest}" =~ ^[0-9a-f]{64}$ && "${separator}" == '  ' ]] || die "encrypted-object checksum manifest is malformed"
     [[ "${relative}" == objects/* && "${relative}" != objects/ && "${relative}" != /* ]] || die "checksum path escaped the encrypted-object directory"
     [[ "/${relative}/" != *'/../'* && "/${relative}/" != *'/./'* ]] || die "checksum path contains traversal components"
+    for seen_path in "${seen_paths[@]}"; do
+      [[ "${relative}" != "${seen_path}" ]] || die "duplicate encrypted-object checksum path"
+    done
+    seen_paths+=("${relative}")
     object_path="${snapshot}/${relative}"
     [[ -f "${object_path}" && ! -L "${object_path}" ]] || die "encrypted object referenced by the manifest is missing"
     actual_digest=$(sha256_file "${object_path}")
@@ -300,6 +305,7 @@ verify_snapshot() {
     record_count=$((record_count + 1))
     record_bytes=$((record_bytes + $(file_size "${object_path}")))
   done < "${snapshot}/SHA256SUMS.nul"
+  [[ -z "${record}" ]] || die "unterminated encrypted-object checksum record"
 
   while IFS= read -r -d '' path; do
     actual_count=$((actual_count + 1))

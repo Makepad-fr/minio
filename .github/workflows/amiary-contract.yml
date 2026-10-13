@@ -52,7 +52,9 @@ jobs:
 
       - name: Static backup contract
         timeout-minutes: 2
-        run: timeout 90s bash scripts/test-amiary-backup-static.sh
+        run: |
+          timeout 90s bash scripts/test-amiary-backup-static.sh
+          python3 scripts/test-amiary-snapshot-integrity.py
 
       - name: Disposable provisioning contract
         timeout-minutes: 5
