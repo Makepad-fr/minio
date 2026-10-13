@@ -22,6 +22,10 @@ docker exec "$container" mc anonymous get admin/fashion-iceberg | grep -q privat
 if MINIO_ICEBERG_SECRET_KEY=wrong-password-must-never-replace-existing bash "$root/scripts/provision-fashion-iceberg.sh" >/dev/null 2>&1; then echo 'Replaced existing password' >&2; exit 1; fi
 [[ $(docker exec "$container" mc cat app/fashion-iceberg/probe) == private-fashion ]]
 if MINIO_ICEBERG_ACCESS_KEY=unrelated bash "$root/scripts/provision-fashion-iceberg.sh" >/dev/null 2>&1; then exit 1; fi
+docker exec "$container" mc admin group add admin unexpected-group scraping-iceberg >/dev/null
+docker exec "$container" mc admin policy attach admin readwrite --group unexpected-group >/dev/null
+if bash "$root/scripts/provision-fashion-iceberg.sh" >/dev/null 2>&1; then echo 'Accepted unexpected group privileges' >&2; exit 1; fi
+docker exec "$container" mc admin group remove admin unexpected-group scraping-iceberg >/dev/null
 docker exec "$container" mc admin policy attach admin readwrite --user scraping-iceberg >/dev/null
 if bash "$root/scripts/provision-fashion-iceberg.sh" >/dev/null 2>&1; then echo 'Accepted unexpected existing policy scope' >&2; exit 1; fi
 printf '%s\n' 'PASS: repeated provisioning, private read/write, cross-bucket/admin denial and credential retention.'
