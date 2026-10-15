@@ -74,7 +74,7 @@ jq -e '
 ' "${restore_policy}" >/dev/null
 
 grep -Fq 'pull_request:' "${workflow}"
-grep -Fq 'runs-on: ubuntu-24.04' "${workflow}"
+grep -Fq 'runs-on: ubuntu-26.04' "${workflow}"
 grep -Fq 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' "${workflow}"
 grep -Fq 'timeout-minutes: 20' "${workflow}"
 grep -Fq 'shellcheck scripts/*.sh' "${workflow}"
