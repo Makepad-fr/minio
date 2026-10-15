@@ -47,3 +47,7 @@ jobs:
             bash -n scripts/provision-makepad-scan.sh scripts/test-scan-provisioning.sh
             scripts/test-scan-provisioning.sh
           fi
+      - name: Verify isolated Fashion provisioning
+        run: |
+          bash -n scripts/provision-fashion-iceberg.sh scripts/test-fashion-provisioning.sh
+          bash scripts/test-fashion-provisioning.sh
