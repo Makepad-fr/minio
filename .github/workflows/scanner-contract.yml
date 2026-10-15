@@ -51,3 +51,9 @@ jobs:
         run: |
           bash -n scripts/provision-fashion-iceberg.sh scripts/test-fashion-provisioning.sh
           bash scripts/test-fashion-provisioning.sh
+      - name: Verify isolated BetaCrew provisioning and object integrity
+        run: bash scripts/validate-betacrew-config.sh
+      - name: Install encrypted backup test dependency
+        run: sudo apt-get update && sudo apt-get install -y restic
+      - name: Verify encrypted BetaCrew snapshot and isolated restore
+        run: python3 scripts/test-betacrew-restore.py
